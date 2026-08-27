@@ -15,6 +15,7 @@ export function Game({ cat }: { cat: CatState }) {
   const [sheet, setSheet] = useState<SheetId>(null)
   const [toy, setToy] = useState(false)
   const [coatLabel, setCoatLabel] = useState('')
+  const [loading, setLoading] = useState<{ stage: string; pct: number } | null>({ stage: 'Preparando', pct: 0 })
   const refresh = useGame((s) => s.refresh)
   const notify = useGame((s) => s.notify)
   const reset = useGame((s) => s.reset)
@@ -30,12 +31,14 @@ export function Game({ cat }: { cat: CatState }) {
       {
         getCat: () => useGame.getState().cat,
         getRuntime: () => useGame.getState().rt,
+        onLoad: (stage, pct) => setLoading(pct >= 1 ? null : { stage, pct }),
       },
       cat.seed,
     )
     sceneRef.current = scene
     setCoatLabel(scene.coatLabel)
     scene.start()
+    void scene.loadModel(new URL('models/cat.glb', document.baseURI).href)
 
     const onResize = () => scene.resize()
     window.addEventListener('resize', onResize)
@@ -128,6 +131,20 @@ export function Game({ cat }: { cat: CatState }) {
           }}
           onClose={() => setSheet(null)}
         />
+      )}
+
+      {loading && (
+        <div className="loading">
+          <div className="loading-card">
+            <div className="loading-title">{loading.stage}…</div>
+            <div className="loading-track">
+              <div className="loading-fill" style={{ width: `${Math.round(loading.pct * 100)}%` }} />
+            </div>
+            <div className="loading-hint">
+              O gato está sendo montado osso por osso. Só acontece uma vez.
+            </div>
+          </div>
+        </div>
       )}
 
       {toast && <div className="toast">{toast}</div>}

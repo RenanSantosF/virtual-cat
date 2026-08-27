@@ -1,0 +1,38 @@
+<style>html,body{margin:0;background:#2a2724;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'three'
+import { GLTFLoader } from '/GLTFLoader.js'
+const r = new THREE.WebGLRenderer({ antialias: true })
+r.setSize(500, 500); r.outputColorSpace = THREE.SRGBColorSpace
+r.toneMapping = THREE.ACESFilmicToneMapping
+document.body.appendChild(r.domElement)
+const sc = new THREE.Scene()
+sc.background = new THREE.Color(0x2a2724)
+const cam = new THREE.PerspectiveCamera(40, 1, 0.01, 100)
+sc.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2.2))
+const d = new THREE.DirectionalLight(0xffffff, 2.5); d.position.set(2, 3, 2); sc.add(d)
+const d2 = new THREE.DirectionalLight(0xaaccff, 1.2); d2.position.set(-2, 1, -2); sc.add(d2)
+new GLTFLoader().load('/models/cat.glb', (g) => {
+  const o = g.scene
+  sc.add(o)
+  const box = new THREE.Box3().setFromObject(o)
+  const size = box.getSize(new THREE.Vector3())
+  const ctr = box.getCenter(new THREE.Vector3())
+  window.__info = {
+    size: size.toArray().map(n => +n.toFixed(4)),
+    center: ctr.toArray().map(n => +n.toFixed(4)),
+    min: box.min.toArray().map(n => +n.toFixed(4)),
+    max: box.max.toArray().map(n => +n.toFixed(4)),
+  }
+  const R = Math.max(size.x, size.y, size.z)
+  window.__render = (yaw, pitch) => {
+    cam.position.set(
+      ctr.x + Math.sin(yaw) * Math.cos(pitch) * R * 1.9,
+      ctr.y + Math.sin(pitch) * R * 1.9,
+      ctr.z + Math.cos(yaw) * Math.cos(pitch) * R * 1.9)
+    cam.lookAt(ctr); r.render(sc, cam)
+  }
+  window.__ready = true
+})
+</script>

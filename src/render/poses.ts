@@ -82,17 +82,20 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
   switch (behavior) {
     case 'sleep': {
       // Enrolado em bola, focinho junto à barriga.
-      pose.height = 0.34
-      pose.pitch = 0.05
-      pose.curl = 0.12
-      // O enrolamento é quase todo lateral: visto de cima, o gato é um círculo.
-      pose.bend = 2.1
+      // "Pão de forma": corpo compacto no chão, patas escondidas embaixo,
+      // cabeça baixa e virada para o flanco. É a postura mais comum de um gato
+      // dormindo e, ao contrário do novelo fechado, não faz o corpo atravessar
+      // a si mesmo quando a malha é deformada por ossos.
+      pose.height = 0.30
+      pose.pitch = 0.04
+      pose.curl = 0.18
+      pose.bend = 0.55
       pose.tuckFront = 1
       pose.tuckBack = 1
-      pose.neck = 0.25
-      pose.headPitch = 0.34
-      pose.headYaw = 0.85
-      pose.headRoll = 0.5
+      pose.neck = 0.35
+      pose.headPitch = 0.30
+      pose.headYaw = 0.55
+      pose.headRoll = 0.35
       face.eyeOpen = 0
       face.earBack = 0.3
       face.earTwitch *= 0.12
@@ -103,11 +106,12 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
     }
     case 'doze': {
       // "Pão de forma": patas escondidas sob o corpo, olhos semicerrados.
-      pose.height = 0.36
-      pose.pitch = 0.06
+      pose.height = 0.34
+      pose.pitch = 0.05
+      pose.bend = 0.3
       pose.tuckFront = 1
       pose.tuckBack = 1
-      pose.neck = 0.55
+      pose.neck = 0.6
       pose.headPitch = 0.14 + Math.sin(t * 0.3) * 0.07
       face.eyeOpen = Math.min(face.eyeOpen, 0.2 + Math.sin(t * 0.4) * 0.1)
       face.earBack = Math.max(face.earBack, 0.12)
@@ -119,8 +123,8 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
     case 'sit': {
       // Sentado: traseiro no chão, dianteiras retas, peito erguido.
       pose.height = 1.0
-      pose.pitch = 0.68
-      pose.tuckBack = 0.82
+      pose.pitch = 0.35
+      pose.tuckBack = 0.9
       pose.tuckFront = 0
       pose.neck = 1.15
       pose.headYaw = Math.sin(t * 0.23) * 0.32
@@ -132,8 +136,8 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
     }
     case 'watch': {
       pose.height = 1.0
-      pose.pitch = 0.68
-      pose.tuckBack = 0.82
+      pose.pitch = 0.35
+      pose.tuckBack = 0.9
       pose.neck = 1.25
       pose.headPitch = -0.2
       // Micro-sacadas: ele está mesmo seguindo alguma coisa lá fora.
@@ -166,8 +170,8 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
     case 'groom': {
       // Lambendo o flanco: sentado, coluna torcida, cabeça no próprio corpo.
       pose.height = 0.95
-      pose.pitch = 0.62
-      pose.tuckBack = 0.8
+      pose.pitch = 0.32
+      pose.tuckBack = 0.88
       pose.bend = 0.5
       pose.neck = 0.7
       pose.headYaw = 0.95 + Math.sin(t * 6.2) * 0.14
@@ -263,8 +267,8 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
     }
     case 'meow': {
       pose.height = 1.0
-      pose.pitch = 0.68
-      pose.tuckBack = 0.82
+      pose.pitch = 0.35
+      pose.tuckBack = 0.9
       pose.neck = 1.2
       const m = (t * 0.75) % 1
       face.jaw = m < 0.45 ? Math.sin((m / 0.45) * Math.PI) * 0.7 : 0
@@ -377,5 +381,8 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
   }
 
   pose.height += bounce.y / A.standHeight
+  // Teto de curvatura: além disto a malha começa a atravessar a si mesma.
+  pose.bend = Math.max(-1.1, Math.min(1.1, pose.bend))
+  pose.curl = Math.max(-0.8, Math.min(0.8, pose.curl))
   return { pose, face }
 }

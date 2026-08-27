@@ -1,7 +1,8 @@
 import { chromium } from 'playwright'
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium',
   args: ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] })
-const p = await b.newPage({ viewport: { width: 400, height: 850 } })
+const ctx = await b.newContext({ viewport: { width: 400, height: 850 } })
+const p = await ctx.newPage()
 const errs = []
 p.on('pageerror', (e) => errs.push(e.message))
 await p.goto('http://127.0.0.1:4173/', { waitUntil: 'networkidle' })

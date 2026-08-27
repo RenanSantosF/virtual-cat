@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { CatModel } from './cat'
+import { GlbCatModel } from './glbcat'
 import { makeCoat, type Coat } from './coat'
 import { autoQuality, type Quality } from './fur'
 import { buildRoom, type RoomRefs } from './room'
@@ -17,6 +18,8 @@ export interface SceneHooks {
   getRuntime: () => Runtime
   /** Chamado quando o gato troca de comportamento, para a UI reagir. */
   onBehaviorChange?: (id: string) => void
+  /** Progresso do carregamento do modelo, 0..1. */
+  onLoad?: (stage: string, pct: number) => void
 }
 
 export class CatScene {
@@ -24,7 +27,8 @@ export class CatScene {
   private scene = new THREE.Scene()
   private camera: THREE.PerspectiveCamera
   private room: RoomRefs
-  private model!: CatModel
+  private model?: CatModel
+  private glb?: GlbCatModel
   private coat!: Coat
   private rig: Rig
   private tailSim = new TailSim()
@@ -89,17 +93,40 @@ export class CatScene {
     this.rig = buildRig(defaultPose(), 1)
     this.attachInput(canvas)
     this.resize()
-    ;(window as unknown as { __catScene?: CatScene }).__catScene = this
+    ;(window as unknown as { __catScene?: unknown }).__catScene = this
   }
 
   rebuildCat(seed: number) {
     if (this.model) {
       this.scene.remove(this.model.group)
       this.model.dispose()
+      this.model = undefined
     }
     this.coat = makeCoat(seed)
     this.model = new CatModel(this.coat, seed, this.quality)
     this.scene.add(this.model.group)
+  }
+
+  /**
+   * Troca o gato procedural pelo modelo esculpido. O procedural continua
+   * servindo de reserva: se o arquivo faltar ou o aparelho não der conta, o
+   * jogo segue com ele em vez de ficar sem gato nenhum.
+   */
+  async loadModel(url: string) {
+    try {
+      const glb = await GlbCatModel.load(url, (stage, pct) => this.hooks.onLoad?.(stage, pct))
+      if (this.model) {
+        this.scene.remove(this.model.group)
+        this.model.dispose()
+        this.model = undefined
+      }
+      this.glb = glb
+      this.scene.add(glb.group)
+      this.hooks.onLoad?.('pronto', 1)
+    } catch (err) {
+      console.warn('Modelo esculpido indisponível; seguindo com o procedural.', err)
+      this.hooks.onLoad?.('pronto', 1)
+    }
   }
 
   /** Congela o gato num comportamento e no centro da sala, para inspeção. */
@@ -150,7 +177,8 @@ export class CatScene {
 
   dispose() {
     this.stop()
-    this.model.dispose()
+    this.model?.dispose()
+    this.glb?.dispose()
     this.room.dispose()
     this.renderer.dispose()
   }
@@ -179,7 +207,8 @@ export class CatScene {
       }
       toNdc(e.clientX, e.clientY)
       this.raycaster.setFromCamera(this.ndc, this.camera)
-      const hit = this.raycaster.intersectObject(this.model.group, true)
+      const target = this.glb?.group ?? this.model?.group
+      const hit = target ? this.raycaster.intersectObject(target, true) : []
       if (hit.length > 0) {
         this.dragging = 'pet'
         this.hooks.getRuntime().petting = true
@@ -339,25 +368,33 @@ export class CatScene {
       anim.pose.headYaw += Math.max(-0.9, Math.min(0.9, rel)) * 0.8
     }
 
-    this.rig = buildRig(anim.pose, neoteny, this.rig)
-
-    // --- Cauda ---
-    const dir = new THREE.Vector3()
-    const root = this.model.tailRoot(this.rig, dir)
-    this.tailSim.step(root, dir, anim.pose, dt)
-    this.model.setTailPoints(this.tailSim.points)
-
-    this.model.update(this.rig, anim.face, scale)
-    this.model.group.position.set(cat.pos[0], 0, cat.pos[1])
-    this.model.group.rotation.y = cat.facing
+    const active = this.glb ?? this.model
+    if (this.glb) {
+      this.glb.update(anim.pose, dt, scale)
+    } else if (this.model) {
+      this.rig = buildRig(anim.pose, neoteny, this.rig)
+      const dir = new THREE.Vector3()
+      const root = this.model.tailRoot(this.rig, dir)
+      this.tailSim.step(root, dir, anim.pose, dt)
+      this.model.setTailPoints(this.tailSim.points)
+      this.model.update(this.rig, anim.face, scale)
+    }
+    if (!active) return
+    active.group.position.set(cat.pos[0], 0, cat.pos[1])
+    active.group.rotation.y = cat.facing
 
     // A câmera mira o centro real do corpo, não a posição dos pés: quando o
-    // gato se enrola para dormir, o tronco sai de cima do ponto de apoio.
-    const N = this.rig.spine.length
-    this.bodyCenter.set(0, 0, 0)
-    for (let i = 0; i < N; i++) this.bodyCenter.add(this.rig.spine[i])
-    this.bodyCenter.divideScalar(N)
-    this.model.group.localToWorld(this.bodyCenter)
+    // gato se deita, o tronco sai de cima do ponto de apoio.
+    if (this.glb) {
+      this.glb.bodyCenter(this.bodyCenter)
+    } else {
+      const N = this.rig.spine.length
+      this.bodyCenter.set(0, 0, 0)
+      for (let i = 0; i < N; i++) this.bodyCenter.add(this.rig.spine[i])
+      this.bodyCenter.divideScalar(N)
+    }
+    active.group.updateMatrixWorld(true)
+    active.group.localToWorld(this.bodyCenter)
 
     this.updateProps(cat, now)
     this.updateCamera(dt, scale)
