@@ -1,5 +1,5 @@
 import { BEHAVIOR_LABEL } from '../ai/brain'
-import { ILLNESS_LABEL, foodSpoilage, litterFilth } from '../sim/engine'
+import { foodSpoilage, litterFilth } from '../sim/engine'
 import { ageLabel, weightKg } from '../sim/growth'
 import type { CatState, NeedKey } from '../sim/types'
 
@@ -21,7 +21,7 @@ function barColor(v: number): string {
 
 /** Humor legível a partir de estresse, saúde e vínculo. */
 export function moodOf(cat: CatState): string {
-  if (cat.health < 45) return 'debilitado'
+  if (cat.died) return 'partiu'
   if (cat.stress > 78) return 'apavorado'
   if (cat.stress > 55) return 'tenso'
   if (cat.needs.hunger < 22) return 'faminto'
@@ -30,11 +30,16 @@ export function moodOf(cat: CatState): string {
   return 'tranquilo'
 }
 
+/**
+ * Avisos do AMBIENTE, nunca do corpo.
+ *
+ * O pote vazio, a água parada e a caixa suja são coisas que você vê ao entrar
+ * no cômodo — não há gato nenhum escondendo isso de você. Já a saúde dele o
+ * jogo não denuncia: um gato de verdade esconde a doença, e perceber é
+ * trabalho do dono. Quem nomeia o quadro é o veterinário.
+ */
 export function alertsFor(cat: CatState, now: number): Array<{ text: string; level: 'bad' | 'warn' }> {
   const out: Array<{ text: string; level: 'bad' | 'warn' }> = []
-  for (const ill of cat.illnesses) {
-    out.push({ text: `${ILLNESS_LABEL[ill.kind]} — precisa de tratamento`, level: 'bad' })
-  }
   if (cat.bowl.food <= 1) out.push({ text: 'O pote de comida está vazio', level: cat.needs.hunger < 40 ? 'bad' : 'warn' })
   else if (foodSpoilage(cat, now) > 0.9) out.push({ text: 'A comida no pote estragou', level: 'warn' })
   if (cat.bowl.water <= 1) out.push({ text: 'Sem água no pote', level: cat.needs.thirst < 45 ? 'bad' : 'warn' })
@@ -44,11 +49,10 @@ export function alertsFor(cat: CatState, now: number): Array<{ text: string; lev
   const filth = litterFilth(cat, now)
   if (filth > 0.82) out.push({ text: 'A caixa de areia está imunda', level: 'bad' })
   else if (filth > 0.55) out.push({ text: 'A caixa precisa de limpeza', level: 'warn' })
-  if (cat.health < 55) out.push({ text: 'Saúde caindo — leve ao veterinário', level: 'bad' })
   return out.slice(0, 3)
 }
 
-export function Hud({ cat, now, coatLabel }: { cat: CatState; now: number; coatLabel: string }) {
+export function Hud({ cat, now }: { cat: CatState; now: number }) {
   const alerts = alertsFor(cat, now)
   return (
     <div className="hud">
@@ -56,7 +60,7 @@ export function Hud({ cat, now, coatLabel }: { cat: CatState; now: number; coatL
         <div>
           <div className="hud-name">{cat.name}</div>
           <div className="hud-sub">
-            {ageLabel(cat.birth, now)} · {weightKg(cat.birth, now).toFixed(2)} kg · {coatLabel}
+            {ageLabel(cat.birth, now)} · {weightKg(cat.birth, now).toFixed(2)} kg
           </div>
         </div>
         <div className="hud-spacer" />
@@ -80,12 +84,12 @@ export function Hud({ cat, now, coatLabel }: { cat: CatState; now: number; coatL
           )
         })}
         <div className="bar-row">
-          <span className="bar-icon">❤️</span>
-          <span className="bar-label">Saúde</span>
+          <span className="bar-icon">🐾</span>
+          <span className="bar-label">Vínculo</span>
           <span className="bar-track">
             <span
               className="bar-fill"
-              style={{ width: `${Math.max(2, cat.health)}%`, background: barColor(cat.health) }}
+              style={{ width: `${Math.max(2, cat.bond)}%`, background: barColor(cat.bond) }}
             />
           </span>
         </div>

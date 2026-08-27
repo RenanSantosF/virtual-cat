@@ -279,7 +279,11 @@ export class GlbPoser {
     outDir.subVectors(T[S[0]], T[S[1]]).normalize()
   }
 
-  /** Patas que devem estar apoiadas nesta pose. */
+  /**
+   * Patas que devem estar apoiadas nesta pose. Vazio quer dizer que o gato
+   * está deitado: o peso passou das patas para o próprio tronco, e é o tronco
+   * que precisa encostar no chão.
+   */
   supportFeet(pose: PoseParams): number[] {
     const out: number[] = []
     for (let k = 0; k < this.rig.legs.length; k++) {
@@ -288,7 +292,21 @@ export class GlbPoser {
       if (tuck > 0.85) continue
       out.push(k)
     }
-    return out.length ? out : [0, 1, 2, 3]
+    return out
+  }
+
+  /** Ossos do tronco, para medir onde a barriga está. */
+  get trunkBones(): number[] {
+    return this.spineIdx
+  }
+
+  /**
+   * Altura em que o tronco repousa quando o gato está deitado. Sai do próprio
+   * bind: é a fração da altura do quadril que corresponde à barriga tocando o
+   * chão, com o corpo achatado sobre as patas dobradas.
+   */
+  get restTrunkY(): number {
+    return this.groundY + (this.baseY - this.groundY) * 0.34
   }
 
   get ground() {

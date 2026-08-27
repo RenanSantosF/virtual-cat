@@ -1,4 +1,4 @@
-import { cure, litterFilth } from './engine'
+import { cure, ILLNESS_LABEL, litterFilth } from './engine'
 import { ageMonths, MS_DAY } from './growth'
 import { clamp } from './random'
 import { SPOTS } from './world'
@@ -26,9 +26,15 @@ export const SHOP: ShopEntry[] = [
   { id: 'brush', name: 'Escova', desc: 'Reduz queda de pelo e bolas de pelo.', price: 60, durable: true },
   { id: 'wand', name: 'Varinha com penas', desc: 'O melhor brinquedo para instinto de caça.', price: 45, durable: true },
   { id: 'ball', name: 'Bolinha', desc: 'Ele brinca sozinho com ela.', price: 20, durable: true },
+  {
+    id: 'fountain', name: 'Fonte de água', price: 180, durable: true,
+    desc: 'Guarda 1,2 L e mantém a água em movimento — ele bebe mais e ela não envelhece.',
+  },
 ]
 
 export const VET_PRICE = 150
+/** Internação de emergência: cara, dolorosa, e a última chance real. */
+export const EMERGENCY_PRICE = 420
 
 const FOOD_GRAMS: Record<FoodKind, number> = {
   kibble: 200,
@@ -75,10 +81,19 @@ export function serveFood(cat: CatState, kind: FoodKind, now: number): ActionRes
   return { ok: true, message: 'Comida no pote.' }
 }
 
+/** Capacidade do bebedouro: o pote comum seca em pouco mais de um dia. */
+export function waterCapacity(cat: CatState): number {
+  return has(cat, 'fountain') ? 1200 : 320
+}
+
 export function fillWater(cat: CatState, now: number): ActionResult {
-  cat.bowl.water = 320
+  const cap = waterCapacity(cat)
+  cat.bowl.water = cap
   cat.bowl.waterFilledAt = now
-  return { ok: true, message: 'Água fresca.' }
+  return {
+    ok: true,
+    message: has(cat, 'fountain') ? 'Fonte cheia. Dá para uns bons dias.' : 'Água fresca.',
+  }
 }
 
 export function cleanLitter(cat: CatState, now: number): ActionResult {
@@ -183,16 +198,55 @@ export function giveMedicine(cat: CatState, id: ItemId): ActionResult {
   return { ok: true, message: 'Remédio administrado. Ele te olhou feio.' }
 }
 
+/**
+ * A consulta faz duas coisas que o jogo não faz sozinho: nomeia o que ele tem
+ * e trata. Antes disso o dono só tem sintomas — que é exatamente a posição de
+ * quem cuida de um gato de verdade.
+ */
 export function vetVisit(cat: CatState, now: number): ActionResult {
   if (cat.inventory.coins < VET_PRICE) return { ok: false, message: 'Moedas insuficientes para a consulta.' }
   cat.inventory.coins -= VET_PRICE
+  const found = cat.illnesses.map((i) => ILLNESS_LABEL[i.kind])
   cat.illnesses = []
   cat.health = clamp(cat.health + 45)
   cat.lastVetVisit = now
   cat.stats.vetVisits += 1
   // A ida ao veterinário é traumática, mesmo quando necessária.
   cat.stress = clamp(cat.stress + 35)
-  return { ok: true, message: 'Consulta feita. Ele está curado, e furioso.' }
+  cat.observed = []
+  const diag = found.length
+    ? `Diagnóstico: ${found.join(' e ')}. Tratado.`
+    : 'Exame limpo. Nada encontrado.'
+  return { ok: true, message: diag }
+}
+
+/**
+ * Internação de emergência. Só faz sentido quando o quadro já é grave, custa
+ * caro e ainda assim é a diferença entre perder o gato e não perder.
+ */
+export function emergencyVet(cat: CatState, now: number): ActionResult {
+  if (cat.died) return { ok: false, message: 'Não há mais o que fazer.' }
+  if (cat.inventory.coins < EMERGENCY_PRICE) {
+    return { ok: false, message: `A internação custa ${EMERGENCY_PRICE} moedas. Você não tem.` }
+  }
+  cat.inventory.coins -= EMERGENCY_PRICE
+  cat.illnesses = []
+  cat.health = clamp(Math.max(cat.health, 55))
+  cat.needs.hunger = clamp(Math.max(cat.needs.hunger, 60))
+  cat.needs.thirst = clamp(Math.max(cat.needs.thirst, 70))
+  cat.lastVetVisit = now
+  cat.stats.vetVisits += 1
+  cat.stress = clamp(cat.stress + 45)
+  cat.bond = clamp(cat.bond - 4)
+  return { ok: true, message: 'Ficou internado e voltou. Vai levar dias para confiar de novo.' }
+}
+
+/** Examinar de perto: o dono registra o que conseguiu notar. */
+export function examineCat(cat: CatState, signs: string[]): ActionResult {
+  cat.observed = signs
+  cat.stress = clamp(cat.stress + 3)
+  if (signs.length === 0) return { ok: true, message: 'Nada de estranho. Ele parece bem.' }
+  return { ok: true, message: `Você notou ${signs.length} ${signs.length === 1 ? 'coisa' : 'coisas'}.` }
 }
 
 /** Recompensa diária por manter as necessidades em dia. */

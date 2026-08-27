@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { CatModel } from './cat'
 import { GlbCatModel } from './glbcat'
 import { makeCoat, type Coat } from './coat'
@@ -8,8 +9,10 @@ import { animate, type AnimContext } from './poses'
 import { buildRig, defaultPose, TailSim, type Rig } from './rig'
 import { bodyScale, neotenyFactor, ageMonths } from '../sim/growth'
 import { advance, litterFilth } from '../sim/engine'
+import { sickness } from '../sim/symptoms'
 import { chooseBehavior, flavor, isStationary, locomote, type Runtime } from '../ai/brain'
 import { petTick } from '../sim/actions'
+import { touch, touchHint } from '../sim/touch'
 import { ROOM } from '../sim/world'
 import type { CatState } from '../sim/types'
 
@@ -20,6 +23,8 @@ export interface SceneHooks {
   onBehaviorChange?: (id: string) => void
   /** Progresso do carregamento do modelo, 0..1. */
   onLoad?: (stage: string, pct: number) => void
+  /** Um toque no corpo, com a dica de por que ele reagiu assim. */
+  onTouch?: (region: string, hint: string | null) => void
 }
 
 export class CatScene {
@@ -51,7 +56,7 @@ export class CatScene {
   // Câmera orbital
   private camYaw = 0.55
   private camPitch = 0.42
-  private camDist = 1.75
+  private camDist = 2.3
   private camTarget = new THREE.Vector3(0, 0.16, 0)
 
   private pointers = new Map<number, { x: number; y: number }>()
@@ -77,12 +82,19 @@ export class CatScene {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.quality === 'high' ? 2 : 1.5))
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.05
+    this.renderer.toneMappingExposure = 1.15
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
 
     this.scene.background = new THREE.Color(0x1b1815)
-    this.scene.fog = new THREE.Fog(0x2a2520, 5, 12)
+    this.scene.fog = new THREE.Fog(0x2a2520, 6, 14)
+
+    // Iluminação indireta de verdade: sem um mapa de ambiente, materiais PBR
+    // ficam chapados e o pelo perde o brilho oleoso que o torna crível.
+    const pmrem = new THREE.PMREMGenerator(this.renderer)
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+    this.scene.environmentIntensity = 0.55
+    pmrem.dispose()
 
     this.camera = new THREE.PerspectiveCamera(38, 1, 0.05, 40)
     this.room = buildRoom()
@@ -212,6 +224,7 @@ export class CatScene {
       if (hit.length > 0) {
         this.dragging = 'pet'
         this.hooks.getRuntime().petting = true
+        this.touchAt(hit[0].point)
       } else {
         this.dragging = 'camera'
       }
@@ -250,6 +263,21 @@ export class CatScene {
     canvas.addEventListener('pointerup', end)
     canvas.addEventListener('pointercancel', end)
     canvas.addEventListener('contextmenu', (e) => e.preventDefault())
+  }
+
+  /** Um toque num ponto do corpo: descobre a região e deixa o gato reagir. */
+  private touchAt(point: THREE.Vector3) {
+    const cat = this.hooks.getCat()
+    if (!cat || !this.glb) return
+    const region = this.glb.regionAt(point)
+    const rt = this.hooks.getRuntime()
+    const now = Date.now()
+    const res = touch(cat, rt, region, now)
+    if (res.say) {
+      rt.say = res.say
+      rt.sayUntil = now + 1800
+    }
+    this.hooks.onTouch?.(region, touchHint(region, res))
   }
 
   private moveLure(cx: number, cy: number, toNdc: (x: number, y: number) => void) {
@@ -355,6 +383,7 @@ export class CatScene {
       stridePhase: this.stridePhase,
       blink: eyeOpen,
       kitten: months < 6 ? 1 - months / 6 : 0,
+      sick: sickness(cat),
     }
     const anim = animate(cat.behavior, ctx)
 
@@ -401,6 +430,16 @@ export class CatScene {
   }
 
   private updateProps(cat: CatState, now: number) {
+    // A luz muda com a hora real: o retângulo de sol some à noite, e a cena
+    // esfria. É a mesma pista que faz o gato despertar ao amanhecer.
+    const hour = new Date(now).getHours() + new Date(now).getMinutes() / 60
+    const day = Math.max(0, Math.sin(((hour - 6) / 12) * Math.PI))
+    const patch = this.room.sunPatch.material as THREE.MeshBasicMaterial
+    patch.opacity = 0.03 + day * 0.22
+    this.room.sun.intensity = 0.35 + day * 2.1
+    this.room.sun.color.setHSL(0.09 - day * 0.02, 0.45 - day * 0.2, 0.55 + day * 0.15)
+    this.scene.environmentIntensity = 0.28 + day * 0.4
+
     // Comida no pote: a pilha encolhe conforme ele come.
     const grams = cat.bowl.food
     const fill = Math.min(1, grams / 120)
@@ -410,7 +449,7 @@ export class CatScene {
     const mat = this.room.foodPile.material as THREE.MeshStandardMaterial
     mat.color.setHex(cat.bowl.foodKind === 'wet' ? 0x9a5a44 : 0x74492a).multiplyScalar(1 - spoil * 0.45)
 
-    const water = Math.min(1, cat.bowl.water / 320)
+    const water = Math.min(1, cat.bowl.water / ((cat.inventory.items.fountain ?? 0) > 0 ? 1200 : 320))
     this.room.waterSurface.visible = water > 0.02
     this.room.waterSurface.position.y = 0.008 + water * 0.02
     this.room.waterSurface.scale.setScalar(0.75 + water * 0.25)
@@ -426,7 +465,7 @@ export class CatScene {
     // primeiro quadro salta direto, senão o app abre com a câmera dentro do chão.
     const follow = this.firstFrame ? 1 : Math.min(1, dt * 2.2)
     this.camTarget.lerp(this.bodyCenter, follow)
-    const d = this.camDist * (0.5 + scale * 0.62)
+    const d = this.camDist * (0.55 + scale * 0.55)
     const x = this.camTarget.x + Math.sin(this.camYaw) * Math.cos(this.camPitch) * d
     const y = this.camTarget.y + Math.sin(this.camPitch) * d
     const z = this.camTarget.z + Math.cos(this.camYaw) * Math.cos(this.camPitch) * d

@@ -10,6 +10,7 @@ import { skeletonize, type ExtractedSkeleton } from './skeletonize'
 import { applyTargets, buildBones, computeSkinning, type RiggedSkeleton } from './glbrig'
 import { GlbPoser } from './glbpose'
 import { defaultPose, type PoseParams } from './rig'
+import type { TouchRegion } from '../sim/touch'
 export { defaultPose }
 
 /** Comprimento do tronco de um gato adulto, do quadril ao pescoço, em metros. */
@@ -229,10 +230,23 @@ export class GlbCatModel {
       }
 
       let worst = -Infinity
-      for (const k of support) {
-        this.rig.bones[this.rig.legs[k].idx[3]].getWorldPosition(_v3)
-        this.mesh.worldToLocal(_v3)
-        worst = Math.max(worst, _v3.y - this.restFootY)
+      if (support.length > 0) {
+        for (const k of support) {
+          this.rig.bones[this.rig.legs[k].idx[3]].getWorldPosition(_v3)
+          this.mesh.worldToLocal(_v3)
+          worst = Math.max(worst, _v3.y - this.restFootY)
+        }
+      } else {
+        // Deitado: o peso está no tronco. A referência passa a ser a barriga,
+        // não a pata — sem isto o assentamento tentava manter quatro patas
+        // apoiadas e o gato "dormia" de pé.
+        let lowestTrunk = Infinity
+        for (const b of this.poser.trunkBones) {
+          this.rig.bones[b].getWorldPosition(_v3)
+          this.mesh.worldToLocal(_v3)
+          lowestTrunk = Math.min(lowestTrunk, _v3.y)
+        }
+        worst = lowestTrunk - this.poser.restTrunkY
       }
       if (!isFinite(worst) || Math.abs(worst) < 0.004) break
       offset = Math.max(-0.35, Math.min(0.35, offset - worst * 0.9))
@@ -240,18 +254,23 @@ export class GlbCatModel {
     // Guardado entre quadros: a pose seguinte começa perto da solução.
     this.settle = offset
 
-    // Ancoragem final: seja qual for a pose, a pata mais baixa encosta no chão.
-    // O assentamento cuida da postura — de quanto a perna dobra —, e esta
-    // correção cuida do contato, que é o que o olho percebe na hora.
+    // Ancoragem final: seja qual for a pose, o ponto mais baixo do corpo
+    // encosta no chão. O assentamento cuida da postura — de quanto a perna
+    // dobra —, e esta correção cuida do contato, que é o que o olho percebe.
     let lowest = Infinity
     for (const leg of this.rig.legs) {
       this.rig.bones[leg.idx[3]].getWorldPosition(_v3)
       this.mesh.worldToLocal(_v3)
-      lowest = Math.min(lowest, _v3.y)
+      lowest = Math.min(lowest, _v3.y - this.restFootY)
     }
-    if (isFinite(lowest)) {
-      this.inner.position.y = -(lowest - this.restFootY)
+    if (support.length === 0) {
+      for (const b of this.poser.trunkBones) {
+        this.rig.bones[b].getWorldPosition(_v3)
+        this.mesh.worldToLocal(_v3)
+        lowest = Math.min(lowest, _v3.y - this.poser.restTrunkY)
+      }
     }
+    if (isFinite(lowest)) this.inner.position.y = -lowest
 
     this.group.scale.setScalar(this.modelScale * scale)
   }
@@ -335,6 +354,53 @@ export class GlbCatModel {
       L.idx.forEach((b, i) => { names[b] = `${legNames[k]}${['root', 'knee', 'ankle', 'paw'][i]}` })
     })
     return names
+  }
+
+  /**
+   * Que parte do corpo está sob um ponto tocado. Compara o ponto de impacto
+   * com a posição atual de cada osso — assim a região acompanha a pose: a
+   * barriga de um gato deitado está onde a pose a colocou, não onde estava no
+   * bind.
+   */
+  regionAt(worldPoint: THREE.Vector3): TouchRegion {
+    _v3.copy(worldPoint)
+    this.mesh.worldToLocal(_v3)
+
+    let best: TouchRegion = 'back'
+    let bestD = Infinity
+    const consider = (bone: number, region: TouchRegion, bias = 1) => {
+      this.rig.bones[bone].getWorldPosition(_v1)
+      this.mesh.worldToLocal(_v1)
+      const d = _v1.distanceTo(_v3) * bias
+      if (d < bestD) { bestD = d; best = region }
+    }
+
+    const S = this.rig.spine.idx
+    consider(S[SPINE_BONES + NECK_BONES], 'head')
+    consider(S[SPINE_BONES + NECK_BONES + 1], 'chin')
+    for (let i = 4; i < SPINE_BONES - 1; i++) consider(S[i], 'back')
+    consider(S[0], 'tailbase')
+    consider(S[1], 'tailbase')
+    for (let i = 2; i < this.rig.tail.idx.length; i++) consider(this.rig.tail.idx[i], 'tail')
+    for (const leg of this.rig.legs) {
+      consider(leg.idx[2], 'paw')
+      consider(leg.idx[3], 'paw')
+    }
+
+    // A barriga não tem osso próprio: é a face de baixo do tronco. Se o ponto
+    // está claramente abaixo do eixo da coluna, é barriga, venha de que osso vier.
+    if (best === 'back') {
+      let spineY = 0
+      let n = 0
+      for (let i = 2; i < SPINE_BONES; i++) {
+        this.rig.bones[S[i]].getWorldPosition(_v1)
+        this.mesh.worldToLocal(_v1)
+        spineY += _v1.y
+        n++
+      }
+      if (n && _v3.y < spineY / n - 0.02) best = 'belly'
+    }
+    return best
   }
 
   /** Centro do tronco, em espaço local, para a câmera enquadrar. */

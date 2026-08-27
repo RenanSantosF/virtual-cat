@@ -3,6 +3,7 @@ import { CatScene } from '../render/scene'
 import { useGame } from '../sim/store'
 import { brush, cleanLitter, dailyBonus, fillWater, has, playSession, type ActionResult } from '../sim/actions'
 import { litterFilth } from '../sim/engine'
+import { askNotifications, canAskNotifications, checkNotifications } from '../sim/notify'
 import { alertsFor, Hud } from './Hud'
 import { FoodPanel, HealthPanel, ProfilePanel, ShopPanel } from './panels'
 import type { CatState } from '../sim/types'
@@ -14,6 +15,7 @@ export function Game({ cat }: { cat: CatState }) {
   const sceneRef = useRef<CatScene | null>(null)
   const [sheet, setSheet] = useState<SheetId>(null)
   const [toy, setToy] = useState(false)
+  const [askNotif, setAskNotif] = useState(false)
   const [coatLabel, setCoatLabel] = useState('')
   const [loading, setLoading] = useState<{ stage: string; pct: number } | null>({ stage: 'Preparando', pct: 0 })
   const refresh = useGame((s) => s.refresh)
@@ -32,6 +34,10 @@ export function Game({ cat }: { cat: CatState }) {
         getCat: () => useGame.getState().cat,
         getRuntime: () => useGame.getState().rt,
         onLoad: (stage, pct) => setLoading(pct >= 1 ? null : { stage, pct }),
+        onTouch: (_region, hint) => {
+          if (hint) useGame.getState().notify(hint)
+          useGame.getState().refresh()
+        },
       },
       cat.seed,
     )
@@ -51,13 +57,21 @@ export function Game({ cat }: { cat: CatState }) {
     }
   }, [cat.seed])
 
+  // O convite para ativar avisos só aparece depois de o jogador se ambientar.
+  useEffect(() => {
+    const id = window.setTimeout(() => setAskNotif(canAskNotifications()), 45_000)
+    return () => window.clearTimeout(id)
+  }, [])
+
   // --- Relógio da interface: as barras se movem sozinhas ---
   useEffect(() => {
     const id = window.setInterval(() => {
       const c = useGame.getState().cat
       if (c) {
-        const bonus = dailyBonus(c, Date.now())
+        const nowMs = Date.now()
+        const bonus = dailyBonus(c, nowMs)
         if (bonus.ok) notify(bonus.message)
+        checkNotifications(c, nowMs)
       }
       refresh()
     }, 1000)
@@ -90,7 +104,7 @@ export function Game({ cat }: { cat: CatState }) {
         <canvas ref={canvasRef} />
       </div>
 
-      <Hud cat={cat} now={now} coatLabel={coatLabel} />
+      <Hud cat={cat} now={now} />
       {bubble && <div className="bubble">{bubble}</div>}
 
       <div className="dock">
@@ -131,6 +145,27 @@ export function Game({ cat }: { cat: CatState }) {
           }}
           onClose={() => setSheet(null)}
         />
+      )}
+
+      {askNotif && (
+        <div className="notif-ask">
+          <div className="notif-text">
+            Quer que eu avise quando o pote ou a caixa precisarem de você?
+            <span className="notif-fine">Nunca aviso sobre a saúde dele — isso é com você.</span>
+          </div>
+          <div className="notif-actions">
+            <button className="btn ghost" onClick={() => setAskNotif(false)}>Agora não</button>
+            <button
+              className="btn"
+              onClick={async () => {
+                await askNotifications()
+                setAskNotif(false)
+              }}
+            >
+              Avisar
+            </button>
+          </div>
+        </div>
       )}
 
       {loading && (

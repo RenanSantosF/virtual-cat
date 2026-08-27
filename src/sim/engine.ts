@@ -63,6 +63,9 @@ export function newCat(name: string, now: number, seed = Math.floor(Math.random(
     bond: 8,
     illnesses: [],
     lastVetVisit: now,
+    died: null,
+    causeOfDeath: null,
+    observed: [],
     bowl: { food: 0, foodKind: 'kibble', servedAt: now, water: 0, waterFilledAt: now },
     litter: { uses: 0, lastCleaned: now },
     inventory: {
@@ -121,6 +124,10 @@ const POINTS_PER_ML = 0.75
  * verdade enquanto você não está olhando.
  */
 export function advance(cat: CatState, now: number): CatState {
+  if (cat.died) {
+    cat.lastTick = now
+    return cat
+  }
   let elapsed = now - cat.lastTick
   if (elapsed <= 0) {
     cat.lastTick = now
@@ -234,8 +241,10 @@ function autonomy(cat: CatState, now: number, hours: number) {
 
   // --- Beber ---
   if (n.thirst < 62 && cat.bowl.water > 0) {
-    const staleness = (now - cat.bowl.waterFilledAt) / (2 * MS_DAY)
-    // Gatos recusam água parada há muito tempo — é assim que ficam desidratados.
+    // A fonte mantém a água circulando: ela não envelhece, e é exatamente por
+    // isso que donos de gato compram uma.
+    const circulating = (cat.inventory.items.fountain ?? 0) > 0
+    const staleness = circulating ? 0 : (now - cat.bowl.waterFilledAt) / (2 * MS_DAY)
     if (staleness < 1.2) {
       const wanted = Math.max(0, (90 - n.thirst) / POINTS_PER_ML)
       const ml = Math.min(cat.bowl.water, wanted, 90 * hours)
@@ -275,16 +284,20 @@ function healthStep(cat: CatState, now: number, hours: number) {
   const n = cat.needs
   let damage = 0
 
-  if (n.hunger < 12) damage += (12 - n.hunger) * 0.09
-  if (n.thirst < 10) damage += (10 - n.thirst) * 0.22 // desidratação mata rápido
-  if (n.hygiene < 20) damage += 0.15
-  if (litterFilth(cat, now) > 0.9) damage += 0.2
-  if (cat.stress > 80) damage += (cat.stress - 80) * 0.03
+  // Calibrado para que a negligência total leve cerca de cinco a seis dias até
+  // a perda — que é o tempo que um gato realmente resiste sem água, e a janela
+  // mínima para o dono perceber os sinais, notar a mudança e agir. Mais rápido
+  // que isso vira punição por viajar, não consequência de descuido.
+  if (n.hunger < 12) damage += (12 - n.hunger) * 0.022
+  if (n.thirst < 10) damage += (10 - n.thirst) * 0.038
+  if (n.hygiene < 20) damage += 0.06
+  if (litterFilth(cat, now) > 0.9) damage += 0.08
+  if (cat.stress > 80) damage += (cat.stress - 80) * 0.012
 
   // Doenças não tratadas pioram sozinhas.
   for (const ill of cat.illnesses) {
     ill.severity = Math.min(1, ill.severity + 0.012 * hours)
-    damage += ill.severity * 0.55
+    damage += ill.severity * 0.22
   }
 
   // Condições crônicas geram doença.
@@ -294,7 +307,7 @@ function healthStep(cat: CatState, now: number, hours: number) {
   }
 
   if (damage > 0) {
-    cat.health = clamp(cat.health - damage * hours, 6, 100)
+    cat.health = clamp(cat.health - damage * hours)
   } else {
     cat.health = clamp(cat.health + 1.6 * hours)
   }
@@ -312,6 +325,37 @@ function healthStep(cat: CatState, now: number, hours: number) {
   // A confiança sobe apenas quando as necessidades básicas estão em dia.
   const wellCared = n.hunger > 55 && n.thirst > 55 && cat.health > 75 && cat.stress < 45
   cat.bond = clamp(cat.bond + (wellCared ? 0.32 : -0.5) * hours)
+
+  if (cat.health <= 0 && !cat.died) {
+    cat.died = now
+    cat.causeOfDeath = deathCause(cat)
+  }
+}
+
+/**
+ * A causa registrada no memorial. Não é para culpar ninguém: é para o dono
+ * entender o que aconteceu, que é a única forma de aprender com a perda.
+ */
+function deathCause(cat: CatState): string {
+  const n = cat.needs
+  if (n.thirst < 10) return 'Desidratação'
+  if (n.hunger < 10) return 'Inanição'
+  const worst = [...cat.illnesses].sort((a, b) => b.severity - a.severity)[0]
+  if (worst) return `${ILLNESS_LABEL[worst.kind]} sem tratamento`
+  return 'Saúde debilitada por tempo demais'
+}
+
+/** Está vivo? Um gato morto não simula mais nada. */
+export function isAlive(cat: CatState): boolean {
+  return cat.died === null
+}
+
+/**
+ * Faixa crítica: a saúde já caiu o bastante para a perda ser questão de dias.
+ * O jogo não avisa o dono disso — mas usa para liberar a emergência.
+ */
+export function isCritical(cat: CatState): boolean {
+  return cat.health < 38
 }
 
 export const ILLNESS_LABEL: Record<IllnessKind, string> = {

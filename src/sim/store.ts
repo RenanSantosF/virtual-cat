@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { newRuntime, type Runtime } from '../ai/brain'
 import { advance, newCat } from './engine'
+import { saveMemorial } from './memorial'
 import { load, save, wipe } from './persistence'
 import type { CatState } from './types'
 
@@ -17,7 +18,10 @@ interface Game {
 }
 
 const boot = load()
-if (boot) advance(boot, Date.now())
+if (boot) {
+  advance(boot, Date.now())
+  if (boot.died) saveMemorial(boot)
+}
 
 export const useGame = create<Game>((set, get) => ({
   cat: boot,
@@ -29,7 +33,13 @@ export const useGame = create<Game>((set, get) => ({
     save(cat)
     set({ cat, rt: newRuntime(), uiTick: get().uiTick + 1 })
   },
-  refresh: () => set((s) => ({ uiTick: s.uiTick + 1 })),
+  refresh: () =>
+    set((s) => {
+      // O memorial é gravado no instante em que a morte é detectada, e não na
+      // hora de recomeçar: se o jogador fechar o app antes, o registro fica.
+      if (s.cat?.died) saveMemorial(s.cat)
+      return { uiTick: s.uiTick + 1 }
+    }),
   notify: (msg) => {
     set({ toast: msg })
     window.setTimeout(() => {

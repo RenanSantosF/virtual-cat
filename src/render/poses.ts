@@ -27,6 +27,8 @@ export interface AnimContext {
   stridePhase: number
   blink: number
   kitten: number
+  /** 0..1 — quanto o corpo denuncia que algo não vai bem. */
+  sick: number
 }
 
 type Gait = { phases: [number, number, number, number]; duty: number; stride: number; lift: number }
@@ -360,6 +362,56 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
       pose.headYaw = Math.sin(ctx.stridePhase * Math.PI * 2) * 0.04
       break
     }
+    case 'retch': {
+      // Engasgo seco: pescoço esticado para a frente e para baixo, corpo
+      // contraído em espasmos. É o sinal mais visível de bola de pelo.
+      const cycle = (t * 1.1) % 1
+      const spasm = Math.max(0, Math.sin(cycle * Math.PI * 3))
+      pose.height = 0.62
+      pose.pitch = 0.1
+      pose.tuckFront = 0.35
+      pose.tuckBack = 0.5
+      pose.neck = -0.7 - spasm * 0.4
+      pose.headPitch = 0.45 + spasm * 0.3
+      pose.arch = 0.15 + spasm * 0.25
+      face.jaw = spasm * 0.55
+      face.eyeOpen = Math.min(face.eyeOpen, 0.35)
+      face.earBack = 0.5
+      pose.tailLift = -0.4
+      pose.tailFlick = 0.02
+      break
+    }
+    case 'sneeze': {
+      const c2 = (t * 1.6) % 1
+      const burst = c2 < 0.2 ? Math.sin((c2 / 0.2) * Math.PI) : 0
+      pose.height = 0.95
+      pose.pitch = 0.3
+      pose.tuckBack = 0.85
+      pose.neck = 1.0 - burst * 0.5
+      pose.headPitch = -0.15 + burst * 0.65
+      face.jaw = burst * 0.35
+      face.eyeOpen = Math.min(face.eyeOpen, 1 - burst)
+      face.earBack = 0.3 + burst * 0.4
+      pose.tailFlick = 0.1
+      break
+    }
+    case 'limp': {
+      // Mancando: passada curta, cabeça baixa, dorso levemente arqueado.
+      applyGait(pose, WALK, ctx.stridePhase, bounce)
+      for (let i = 0; i < 4; i++) {
+        pose.legReach[i] *= 0.55
+        pose.legLift[i] *= 0.5
+      }
+      pose.height = 0.88
+      pose.arch = 0.16
+      pose.neck = 0.6
+      pose.headPitch = 0.16
+      face.earBack = Math.max(face.earBack, 0.35)
+      face.eyeOpen = Math.min(face.eyeOpen, 0.6)
+      pose.tailLift = -0.5
+      pose.tailFlick = 0.03
+      break
+    }
     case 'idle':
     default: {
       pose.height = 1.0
@@ -372,6 +424,20 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
 
   // A respiração entra depois da pose, para valer em qualquer posição.
   pose.arch += breath * (behavior === 'sleep' ? 0.05 : 0.018)
+
+  // Doença encurva a postura, baixa a cabeça e derruba a cauda, seja qual for
+  // o comportamento. É o sinal de fundo que o dono aprende a reconhecer.
+  if (ctx.sick > 0.05) {
+    pose.arch += ctx.sick * 0.18
+    pose.neck -= ctx.sick * 0.35
+    pose.headPitch += ctx.sick * 0.2
+    pose.height -= ctx.sick * 0.08
+    pose.tailLift -= ctx.sick * 0.5
+    pose.tailFlick *= 1 - ctx.sick * 0.8
+    face.eyeOpen = Math.min(face.eyeOpen, 1 - ctx.sick * 0.45)
+    face.earBack = Math.max(face.earBack, ctx.sick * 0.5)
+    face.whisker *= 1 - ctx.sick * 0.5
+  }
 
   // Filhote: mais rápido, mais brusco, um pouco desengonçado.
   if (ctx.kitten > 0) {

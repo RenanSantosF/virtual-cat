@@ -6,6 +6,15 @@ um gato de verdade: com fome, sede, sono, temperamento e vontade própria.
 PWA feito em React + Three.js. Instalável pelo navegador do celular, funciona
 offline e não depende de servidor: tudo roda no aparelho.
 
+## O gato é o modelo esculpido, animado por um esqueleto gerado na hora
+
+O `public/models/cat.glb` chegou como uma casca única de 98 mil vértices, sem
+ossos e sem animação — um modelo de impressão 3D, apesar de anunciado como
+"game ready". Em vez de virar estátua, ele passa por um rigger automático que lê
+a anatomia da própria malha e monta 38 ossos sobre ela. A partir daí responde ao
+mesmo sistema de poses, marchas e IK do gato procedural, que segue no projeto
+como reserva caso o arquivo falte.
+
 ## O que faz dele um gato, e não um tamagotchi
 
 **Ele cresce no tempo do calendário.** Chega com oito semanas, pesando cerca de
@@ -27,8 +36,21 @@ entardecer). Às vezes ele vem quando você chama. Às vezes escolhe a soneca.
 **Carinho tem limite.** Todo gato tem um teto de tolerância ao toque. Passar dele
 custa confiança, e acordar um gato que está dormindo custa mais ainda.
 
-**Cada gato é único.** A semente sorteia sete traços de temperamento e a
-pelagem. Um gato arisco pode levar semanas para deixar você encostar.
+**Cada gato é único, e a perda é definitiva.** A semente sorteia sete traços de
+temperamento. Se você negligenciar a ponto de perdê-lo, ele não volta: fica um
+memorial com o nome, quanto viveu, do que morreu e quem ele era. O próximo gato
+terá outro temperamento — nunca o mesmo.
+
+**Ele esconde a doença, como todo gato.** O app nunca avisa que ele está doente:
+gato é presa, e mostrar fraqueza é instinto de morte. O que muda é o
+comportamento — ele engasca, espirra, para de se lamber, se esconde, recusa a
+ração, anda encolhido. Perceber é trabalho seu. Quem dá nome ao quadro é o
+veterinário, e é isso que torna a consulta uma decisão em vez de um botão.
+
+**Onde você encosta importa.** Queixo, bochecha e base da cauda são bem-vindos —
+é onde ele próprio se esfrega em você. Barriga, patas e cauda não são: a barriga
+exposta é confiança, não convite, e quem insiste leva mordida. Um gato arisco
+não deixa encostar em lugar nenhum até confiar.
 
 ## Números que a simulação respeita
 
@@ -40,29 +62,44 @@ pelagem. Um gato arisco pode levar semanas para deixar você encostar.
 | Uso da caixa | 3–5 vezes/dia | idem |
 | Peso ao adotar | 0,9 kg (8 semanas) | curva de crescimento |
 | Peso adulto | 4,5 kg (12–24 meses) | idem |
-| Altura na cernelha | ~25 cm | proporções do modelo |
+| Altura na cernelha | ~25 cm | medida no modelo importado |
+| Negligência até a perda | 5 a 6 dias | resistência real sem água |
+| Autonomia do pote de água | ~1,5 dia | 320 ml |
+| Autonomia da fonte | ~4 dias | 1,2 L que não envelhece |
 
-## O corpo é construído, não importado
+## Como uma escultura vira um gato que anda
 
-Não há modelo 3D no repositório: o gato é gerado por código a cada quadro.
+O rigging automático acontece no aparelho, uma vez, ao abrir o app.
 
-- **Coluna** — 30 pontos gerados por acúmulo de ângulo, o que deixa o corpo
-  arquear, torcer e enrolar como um corpo inteiro, não como peças articuladas.
-- **Pernas** — IK analítico de dois ossos por membro, com o segmento digitígrado
-  que faz o gato parecer andar na ponta dos dedos. Recolher a perna encurta os
-  ossos e desliza o pé para debaixo do corpo, porque uma perna dobrada em Z
-  ocupa muito menos espaço do que a soma dos seus segmentos.
-- **Marchas** — caminhada em sequência lateral, trote diagonal e galope saltado,
-  com a frequência da passada derivada da velocidade real: o pé nunca patina.
-- **Cauda** — Verlet perseguindo uma curva-alvo definida pela musculatura, o que
-  dá o peso e o atraso de uma cauda de verdade sem nunca sair de controle.
-- **Pelagem** — textura procedural (rajado, marmorizado, sólido, bicolor,
-  escaminha) com o mapa espelhado em torno da barriga, para não haver costura no
-  dorso; sobre ela, pelo em cascas deslocadas ao longo da normal e um material
-  físico com brilho de veludo.
-- **Rosto** — pupila em fenda vertical que dilata com a excitação, pálpebras que
-  fecham de verdade, orelhas que achatam com o estresse, bigodes que se abrem
-  quando ele está alerta.
+1. **Limpeza** (`meshclean`) — solda vértices coincidentes e descarta tudo que
+   não seja o maior componente conexo: o arquivo traz um fragmento solto
+   flutuando atrás do gato. Converte os atributos quantizados do meshopt para
+   float, sem o que qualquer escrita nos buffers truncaria os valores a zero — as
+   normais somem e o modelo renderiza inteiramente preto sob luz.
+2. **Anatomia** (`skeletonize`) — fatia o corpo ao longo do eixo focinho-cauda e
+   lê a estrutura dos cortes. O tronco é a região larga que toca o chão pelas
+   pernas; o pescoço fica logo à frente do último corte com patas no solo; a
+   cauda é reconstruída por anéis de distância a partir da base, porque um corte
+   transversal deixa de descrevê-la assim que ela sobe.
+3. **Ossos e pesos** (`glbrig`) — 38 ossos com a pose original como bind, e peso
+   por proximidade aos segmentos, com falloff agressivo e corte das influências
+   residuais: sem isso o osso de uma perna puxa a carne da outra e o tronco
+   derrete ao andar.
+4. **Pose** (`glbpose`) — traduz os mesmos `PoseParams` do gato procedural,
+   preservando a curvatura que o escultor pôs na malha, convertendo metros para
+   a escala do modelo e assentando o corpo em três iterações até a pata encostar
+   no chão.
+
+O que anima esses ossos é o mesmo sistema de sempre: IK analítico de dois ossos
+por perna com segmento digitígrado, marchas reais (caminhada em sequência
+lateral, trote diagonal, galope saltado) com a frequência da passada derivada da
+velocidade para o pé não patinar, e cauda em Verlet perseguindo uma curva-alvo
+muscular.
+
+O gato procedural (`cat.ts`, `rig.ts`, `coat.ts`, `fur.ts`) continua completo no
+projeto: corpo gerado por código a cada quadro, pelagem procedural em cinco
+padrões e rosto com pupila em fenda que dilata. Ele entra em cena se o modelo
+esculpido não puder ser carregado.
 
 ## Rodar
 
@@ -82,9 +119,12 @@ de início".
 olhar na mão:
 
 ```bash
-node tools/multishot.mjs <dir> '[{"name":"side","behavior":"walk","cam":[1.3,0.13,1.05]}]'
+node tools/poseshot.mjs <dir> '[{"name":"sit","behavior":"sit","cam":[1.3,0.15,1.0]}]'
+node tools/glbshot.mjs <dir>      # desenha o esqueleto extraído sobre a malha
 node tools/uitest.mjs <dir>       # percorre a interface inteira e reporta erros
-node tools/offlinetest.mjs        # simula ausências de 8 h a 7 dias
+node tools/offlinetest.mjs        # ausências de 8 h a 5 dias, até a perda
+node tools/deathtest.mjs <dir>    # confere que nenhuma tela entrega o diagnóstico
+node tools/fountaintest.mjs       # autonomia com e sem fonte de água
 node tools/makeicons.mjs          # regenera os ícones do PWA
 ```
 
@@ -94,15 +134,29 @@ Todos precisam do `npm run preview` rodando em `127.0.0.1:4173`. A cena expõe
 ## Estrutura
 
 ```
-src/sim/      necessidades, crescimento, saúde, economia, persistência
+src/sim/      necessidades, crescimento, doença, morte, toque, economia
 src/ai/       escolha de comportamento e locomoção
-src/render/   anatomia, esqueleto, poses, pelagem, cena
-src/ui/       interface React
+src/render/   rigging do modelo, poses, marchas, cena e cômodo
+src/ui/       interface React, memorial
+tools/        validação visual e de simulação
+public/models/cat.glb   o gato esculpido
 ```
+
+## Notificações
+
+O app avisa sobre o **ambiente** — pote vazio, água velha, caixa suja —, nunca
+sobre a saúde dele. Descobrir que o gato está doente continua sendo trabalho do
+dono, e um aviso automático destruiria justamente a mecânica central.
+
+Limitação honesta: sem servidor de push, o navegador só dispara esses avisos
+enquanto a aba continua viva em segundo plano. Fechada de vez, o aviso não
+chega. Resolver isso exige um servidor de push ou o app nativo.
 
 ## Próximos passos
 
-- Notificações push quando o pote esvazia ou a saúde cai
-- Migração para React Native (a camada `src/sim` e `src/ai` é agnóstica de
-  plataforma; só `src/render` e `src/ui` precisam de porte)
+- Servidor de push, para os avisos de ambiente chegarem com o app fechado
+- Ossos de orelha no modelo importado: orelha achatada é o sinal de humor mais
+  legível de um gato, e a malha esculpida ainda tem o rosto estático
+- Migração para React Native (`src/sim` e `src/ai` são agnósticos de plataforma;
+  só `src/render` e `src/ui` precisam de porte)
 - Compras reais para ração, remédio e veterinário

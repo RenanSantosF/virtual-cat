@@ -1,6 +1,10 @@
 import { Sheet } from './Sheet'
-import { SHOP, VET_PRICE, buy, giveMedicine, recommendedFood, serveFood, vetVisit, type ActionResult } from '../sim/actions'
-import { ILLNESS_LABEL, ILLNESS_SIGN, isTreatableAtHome } from '../sim/engine'
+import {
+  EMERGENCY_PRICE, SHOP, VET_PRICE, buy, emergencyVet, examineCat, giveMedicine,
+  recommendedFood, serveFood, vetVisit, type ActionResult,
+} from '../sim/actions'
+import { isCritical } from '../sim/engine'
+import { examine } from '../sim/symptoms'
 import { ageLabel, lifeStage, STAGE_LABEL, weightKg, MS_DAY } from '../sim/growth'
 import { describe } from '../sim/personality'
 import type { CatState, FoodKind, ItemId } from '../sim/types'
@@ -15,6 +19,7 @@ const FOOD_ICON: Record<FoodKind, string> = {
 const ITEM_ICON: Record<ItemId, string> = {
   kibble: '🥫', wet: '🍗', kittenFormula: '🍼', treat: '🐟', litter: '🪣',
   dewormer: '💊', coldMedicine: '💊', hairballPaste: '🧴', brush: '🪮', wand: '🪶', ball: '⚽',
+  fountain: '⛲',
 }
 
 interface PanelProps {
@@ -98,37 +103,40 @@ export function ShopPanel({ cat, run, onClose }: Omit<PanelProps, 'now'> & { onC
 
 export function HealthPanel({ cat, now, run, onClose }: PanelProps & { onClose: () => void }) {
   const meds: ItemId[] = ['dewormer', 'coldMedicine', 'hairballPaste']
-  const needsVet = cat.illnesses.some((i) => !isTreatableAtHome(i.kind)) || cat.health < 55
+  const signs = examine(cat, now)
   const daysSinceVet = Math.floor((now - cat.lastVetVisit) / MS_DAY)
+  const critical = isCritical(cat)
 
   return (
     <Sheet
-      title="Saúde"
-      hint={`Saúde ${Math.round(cat.health)}/100 · última consulta há ${daysSinceVet} ${daysSinceVet === 1 ? 'dia' : 'dias'}.`}
+      title="Examinar"
+      hint={`Última consulta há ${daysSinceVet} ${daysSinceVet === 1 ? 'dia' : 'dias'}. Gato esconde dor — o que dá para ver é isto.`}
       onClose={onClose}
     >
-      {cat.illnesses.length === 0 ? (
+      <button className="btn ghost" style={{ width: '100%', marginBottom: 14 }}
+        onClick={() => run(() => examineCat(cat, signs))}>
+        🔍 Olhar de perto
+      </button>
+
+      {signs.length === 0 ? (
         <p className="hint" style={{ marginBottom: 16 }}>
-          Nenhum sintoma no momento. Vermifugação a cada seis meses evita a maioria dos problemas.
+          Nada de estranho no momento. Pelo no lugar, olhos limpos, respiração calma.
         </p>
       ) : (
-        cat.illnesses.map((ill) => (
-          <div className="row" key={ill.kind}>
-            <span className="row-icon">🩺</span>
+        signs.map((sgn) => (
+          <div className="row" key={sgn}>
+            <span className="row-icon">👁️</span>
             <div className="row-body">
-              <div className="row-title">
-                {ILLNESS_LABEL[ill.kind]}
-                <span className="tag" style={{ marginLeft: 6 }}>
-                  {ill.severity > 0.6 ? 'grave' : ill.severity > 0.3 ? 'moderado' : 'leve'}
-                </span>
-              </div>
-              <div className="row-desc">{ILLNESS_SIGN[ill.kind]}</div>
+              <div className="row-desc" style={{ marginTop: 0, fontSize: 13, color: 'var(--text)' }}>{sgn}</div>
             </div>
           </div>
         ))
       )}
 
-      <h2 style={{ marginTop: 18 }}>Remédios</h2>
+      <h2 style={{ marginTop: 18 }}>Remédios de casa</h2>
+      <p className="hint">
+        Dar remédio no escuro é chute: o errado não faz efeito e ainda estressa o gato.
+      </p>
       {meds.map((m) => {
         const item = SHOP.find((s) => s.id === m)!
         const count = cat.inventory.items[m] ?? 0
@@ -149,23 +157,42 @@ export function HealthPanel({ cat, now, run, onClose }: PanelProps & { onClose: 
 
       <h2 style={{ marginTop: 18 }}>Veterinário</h2>
       <p className="hint">
-        Resolve qualquer quadro, inclusive os que não têm remédio em casa. Ele vai odiar a viagem —
-        o estresse sobe bastante depois da consulta.
+        É quem descobre o que ele tem. Você leva porque notou alguma coisa — e sai
+        de lá sabendo o nome. Ele vai odiar a viagem.
       </p>
       <div className="row">
         <span className="row-icon">🏥</span>
         <div className="row-body">
-          <div className="row-title">Consulta completa</div>
-          <div className="row-desc">{needsVet ? 'Recomendada agora.' : 'Sem indicação no momento.'}</div>
+          <div className="row-title">Consulta e diagnóstico</div>
+          <div className="row-desc">Identifica e trata o que estiver acontecendo.</div>
         </div>
         <button
-          className={needsVet ? 'btn' : 'btn ghost'}
+          className="btn"
           disabled={cat.inventory.coins < VET_PRICE}
           onClick={() => run(() => vetVisit(cat, Date.now()))}
         >
           🪙 {VET_PRICE}
         </button>
       </div>
+
+      {critical && (
+        <div className="row" style={{ marginTop: 4 }}>
+          <span className="row-icon">🚑</span>
+          <div className="row-body">
+            <div className="row-title" style={{ color: 'var(--bad)' }}>Internação de emergência</div>
+            <div className="row-desc">
+              Ele está muito mal. Isto o tira do buraco — não há garantia de uma segunda chance.
+            </div>
+          </div>
+          <button
+            className="btn danger"
+            disabled={cat.inventory.coins < EMERGENCY_PRICE}
+            onClick={() => run(() => emergencyVet(cat, Date.now()))}
+          >
+            🪙 {EMERGENCY_PRICE}
+          </button>
+        </div>
+      )}
     </Sheet>
   )
 }

@@ -54,6 +54,8 @@ export interface Illness {
   since: number
   /** 0..1 — piora sozinha se não tratada. */
   severity: number
+  /** O veterinário já nomeou este quadro? Antes disso, só há sintomas. */
+  diagnosed?: boolean
 }
 
 export type FoodKind = 'kibble' | 'wet' | 'treat' | 'kittenFormula'
@@ -87,6 +89,7 @@ export type ItemId =
   | 'brush'
   | 'wand'
   | 'ball'
+  | 'fountain'
 
 export interface Inventory {
   coins: number
@@ -114,6 +117,11 @@ export type BehaviorId =
   | 'meow'
   | 'hide'
   | 'purr'
+  /** Engasgo seco: bola de pelo ou enjoo. */
+  | 'retch'
+  | 'sneeze'
+  /** Mancando ou andando devagar demais. */
+  | 'limp'
 
 export interface CatState {
   version: number
@@ -137,6 +145,10 @@ export interface CatState {
   illnesses: Illness[]
   /** ms epoch da última vermifugação/vacina. */
   lastVetVisit: number
+  /** Quando morreu, se morreu. A partir daí o gato não volta. */
+  died: number | null
+  /** Causa registrada no memorial. */
+  causeOfDeath: string | null
 
   bowl: Bowl
   litter: LitterBox
@@ -153,6 +165,9 @@ export interface CatState {
   facing: number
 
   /** Estatísticas para a economia e o vínculo. */
+  /** Sinais que o dono registrou ao examinar o gato de perto. */
+  observed: string[]
+
   stats: {
     meals: number
     plays: number

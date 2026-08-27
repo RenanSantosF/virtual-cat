@@ -1,4 +1,5 @@
 import { crepuscularDrive, foodSpoilage, litterFilth } from '../sim/engine'
+import { activeSymptomBehavior, sickness } from '../sim/symptoms'
 import { ageMonths } from '../sim/growth'
 import { clampToRoom, dist, ROOM, SPOTS } from '../sim/world'
 import type { BehaviorId, CatState } from '../sim/types'
@@ -36,6 +37,9 @@ export function newRuntime(): Runtime {
 
 /** Quanto tempo, no mínimo, o gato mantém cada comportamento (ms). */
 const MIN_DURATION: Partial<Record<BehaviorId, number>> = {
+  retch: 6_000,
+  sneeze: 3_500,
+  limp: 12_000,
   sleep: 25 * 60_000,
   doze: 6 * 60_000,
   groom: 40_000,
@@ -141,10 +145,24 @@ export function chooseBehavior(cat: CatState, rt: Runtime, now: number): Candida
   c.push({ id: 'sit', score: 22 })
   c.push({ id: 'walk', score: 26 * (0.4 + p.curiosity) * drive, target: randomSpot(cat, now) })
 
-  // Doença deixa o gato apático e encolhido.
-  if (cat.illnesses.length > 0 || cat.health < 55) {
-    const sick = cat.illnesses.reduce((a, i) => a + i.severity, 0) + (55 - cat.health) / 55
-    c.push({ id: 'doze', score: 90 * sick, target: SPOTS.bed })
+  // --- Doença ---
+  // O gato não avisa que está doente: ele muda de comportamento, e cabe ao dono
+  // reparar. Fica apático, se esconde, para de se lamber e, de vez em quando,
+  // deixa escapar o sintoma — um engasgo, um espirro.
+  const sick = sickness(cat)
+  if (sick > 0.05) {
+    c.push({ id: 'doze', score: 120 * sick, target: SPOTS.bed })
+    // Doente, ele procura canto quieto em vez de companhia.
+    c.push({ id: 'hide', score: 70 * sick * (0.4 + p.timidity), target: SPOTS.bed })
+    const symptom = activeSymptomBehavior(cat)
+    if (symptom) {
+      // O sintoma aparece em surtos curtos: a maior parte do tempo ele parece
+      // apenas "meio quieto", que é o que engana o dono desatento.
+      const bucket = Math.floor(now / 40_000)
+      const r = Math.abs(Math.sin(bucket * 41.7 + cat.seed))
+      if (r < 0.18 + sick * 0.3) c.push({ id: symptom, score: 500 })
+    }
+    if (sick > 0.5) c.push({ id: 'limp', score: 60 * sick, target: randomSpot(cat, now) })
   }
 
   // Histerese: o comportamento atual leva vantagem, então ele não fica trocando
@@ -188,6 +206,8 @@ export function moveSpeed(cat: CatState): number {
       return 0.62
     case 'hide':
       return 1.8
+    case 'limp':
+      return 0.28
     default:
       return 0.55
   }
@@ -226,7 +246,7 @@ export function isStationary(b: BehaviorId): boolean {
   return (
     b === 'sleep' || b === 'doze' || b === 'sit' || b === 'groom' || b === 'knead' ||
     b === 'watch' || b === 'eat' || b === 'drink' || b === 'litter' || b === 'meow' ||
-    b === 'purr' || b === 'stretch' || b === 'hide'
+    b === 'purr' || b === 'stretch' || b === 'hide' || b === 'retch' || b === 'sneeze'
   )
 }
 
@@ -251,6 +271,9 @@ export const BEHAVIOR_LABEL: Record<BehaviorId, string> = {
   meow: 'Miando pra você',
   hide: 'Escondido',
   purr: 'Ronronando',
+  retch: 'Engasgando',
+  sneeze: 'Espirrando',
+  limp: 'Andando devagar',
 }
 
 /** Frases curtas para o balão — sempre observacionais, nunca "falando". */
@@ -267,6 +290,10 @@ export function flavor(cat: CatState, b: BehaviorId): string | null {
       return null
     case 'hide':
       return cat.stress > 80 ? '...' : null
+    case 'retch':
+      return 'hhhk... hhhk...'
+    case 'sneeze':
+      return 'atchim!'
     default:
       return null
   }

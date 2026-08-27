@@ -38,7 +38,7 @@ GlbCatModel.load('./models/cat.glb').then((cat) => {
   window.__pose = (b, t, stride) => {
     const anim = animate(b as BehaviorId, {
       t, speed: 0.6, contentment: 0.7, stress: 0.15, energy: 0.7,
-      stridePhase: stride, blink: 1, kitten: 0,
+      stridePhase: stride, blink: 1, kitten: 0, sick: 0,
     })
     // Alguns quadros para a cauda assentar na pose.
     for (let i = 0; i < 30; i++) cat.update(anim.pose, 1 / 60, 1)
@@ -129,7 +129,7 @@ GlbCatModel.load('./models/cat.glb').then((cat) => {
   ;(window as unknown as { __feet?: (b: string) => unknown }).__feet = (b: string) => {
     const anim = animate(b as BehaviorId, {
       t: 0, speed: 0.6, contentment: 0.7, stress: 0.15, energy: 0.7,
-      stridePhase: 0, blink: 1, kitten: 0,
+      stridePhase: 0, blink: 1, kitten: 0, sick: 0,
     })
     return { pose: { height: anim.pose.height, pitch: anim.pose.pitch, tuckB: anim.pose.tuckBack, tuckF: anim.pose.tuckFront },
              probe: cat.probeFeet(anim.pose) }

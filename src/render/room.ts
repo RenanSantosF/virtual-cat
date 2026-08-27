@@ -66,6 +66,7 @@ function wallTexture(size = 512): THREE.CanvasTexture {
 
 export interface RoomRefs {
   group: THREE.Group
+  sunPatch: THREE.Mesh
   foodBowl: THREE.Mesh
   foodPile: THREE.Mesh
   waterSurface: THREE.Mesh
@@ -224,6 +225,117 @@ export function buildRoom(): RoomRefs {
   rug.receiveShadow = true
   group.add(rug)
 
+  // --- Rodapé: dá escala e assenta a parede no chão ---
+  const skirt = new THREE.MeshStandardMaterial({ color: 0xf0ece3, roughness: 0.5 })
+  const skirtBack = new THREE.Mesh(new THREE.BoxGeometry(ROOM.halfW * 2 + 1, 0.09, 0.02), skirt)
+  skirtBack.position.set(0, 0.045, -ROOM.halfD - 0.49)
+  group.add(skirtBack)
+  const skirtLeft = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.09, ROOM.halfD * 2 + 1), skirt)
+  skirtLeft.position.set(-ROOM.halfW - 0.49, 0.045, 0)
+  group.add(skirtLeft)
+
+  // --- Cortina: quebra a luz dura da janela e dá tecido à cena ---
+  const curtainMat = new THREE.MeshPhysicalMaterial({
+    color: 0xe8dccb, roughness: 1, sheen: 1,
+    sheenColor: new THREE.Color(0xfff2e0), side: THREE.DoubleSide,
+  })
+  for (const side of [-1, 1]) {
+    const pts: THREE.Vector2[] = []
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10
+      // Pregas: o raio oscila para o pano não ficar um cilindro liso.
+      pts.push(new THREE.Vector2(0.055 + Math.sin(t * Math.PI * 5) * 0.012, t * 1.5))
+    }
+    const curtain = new THREE.Mesh(new THREE.LatheGeometry(pts, 16, 0, Math.PI), curtainMat)
+    curtain.scale.set(1, 1, 0.42)
+    curtain.position.set(SPOTS.window[0] + side * 0.68, 0.32, -ROOM.halfD - 0.4)
+    curtain.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2
+    curtain.castShadow = true
+    group.add(curtain)
+  }
+  const rod = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.012, 0.012, 1.7, 10),
+    new THREE.MeshStandardMaterial({ color: 0x5a4638, roughness: 0.5, metalness: 0.3 }),
+  )
+  rod.rotation.z = Math.PI / 2
+  rod.position.set(SPOTS.window[0], 1.82, -ROOM.halfD - 0.4)
+  group.add(rod)
+
+  // --- Planta: o único verde da sala ---
+  const pot = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.11, 0.085, 0.18, 20),
+    new THREE.MeshStandardMaterial({ color: 0xb2704a, roughness: 0.75 }),
+  )
+  pot.position.set(-ROOM.halfW + 0.36, 0.09, -ROOM.halfD + 0.34)
+  pot.castShadow = true
+  pot.receiveShadow = true
+  group.add(pot)
+  const leafMat = new THREE.MeshPhysicalMaterial({
+    color: 0x4e7a45, roughness: 0.6, sheen: 0.5, side: THREE.DoubleSide,
+  })
+  for (let i = 0; i < 11; i++) {
+    const a = (i / 11) * Math.PI * 2
+    const lean = 0.35 + (i % 3) * 0.18
+    const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), leafMat)
+    leaf.scale.set(0.28, 1, 0.7)
+    leaf.position.set(
+      pot.position.x + Math.sin(a) * 0.09 * lean,
+      pot.position.y + 0.16 + (i % 4) * 0.055,
+      pot.position.z + Math.cos(a) * 0.09 * lean,
+    )
+    leaf.rotation.set(Math.cos(a) * lean, a, -Math.sin(a) * lean)
+    leaf.castShadow = true
+    group.add(leaf)
+  }
+
+  // --- Caixa de papelão: o móvel favorito de qualquer gato ---
+  const cardboard = new THREE.MeshStandardMaterial({ color: 0xc2a179, roughness: 0.95 })
+  const boxW = 0.34
+  const boxH = 0.2
+  const boxD = 0.28
+  const boxGroup = new THREE.Group()
+  const bottom = new THREE.Mesh(new THREE.BoxGeometry(boxW, 0.012, boxD), cardboard)
+  bottom.position.y = 0.006
+  boxGroup.add(bottom)
+  for (const [w, d, x, z] of [
+    [boxW, 0.012, 0, -boxD / 2], [boxW, 0.012, 0, boxD / 2],
+    [0.012, boxD, -boxW / 2, 0], [0.012, boxD, boxW / 2, 0],
+  ] as Array<[number, number, number, number]>) {
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(w, boxH, d), cardboard)
+    wall.position.set(x, boxH / 2, z)
+    wall.castShadow = true
+    wall.receiveShadow = true
+    boxGroup.add(wall)
+  }
+  boxGroup.position.set(ROOM.halfW - 0.55, 0, -ROOM.halfD + 0.5)
+  boxGroup.rotation.y = -0.35
+  group.add(boxGroup)
+
+  // --- Almofada, para o chão não ser só madeira ---
+  const cushion = new THREE.Mesh(
+    new THREE.BoxGeometry(0.36, 0.09, 0.36),
+    new THREE.MeshPhysicalMaterial({
+      color: 0x8d6f7d, roughness: 1, sheen: 1, sheenColor: new THREE.Color(0xc4a7b4),
+    }),
+  )
+  cushion.position.set(-1.55, 0.045, -0.55)
+  cushion.rotation.y = 0.4
+  cushion.castShadow = true
+  cushion.receiveShadow = true
+  group.add(cushion)
+
+  // --- Retângulo de sol no chão: é o que o gato procura de manhã ---
+  const sunPatch = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.15, 1.5),
+    new THREE.MeshBasicMaterial({
+      color: 0xfff0cf, transparent: true, opacity: 0.16,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }),
+  )
+  sunPatch.rotation.x = -Math.PI / 2
+  sunPatch.position.set(SPOTS.window[0] - 0.15, 0.004, -ROOM.halfD + 1.05)
+  group.add(sunPatch)
+
   // --- Brinquedo (varinha), aparece só quando o jogador usa ---
   const toy = new THREE.Group()
   const feather = new THREE.Mesh(
@@ -270,6 +382,7 @@ export function buildRoom(): RoomRefs {
 
   return {
     group,
+    sunPatch,
     foodBowl,
     foodPile,
     waterSurface,

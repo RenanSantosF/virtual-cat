@@ -1,9 +1,12 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useGame } from '../sim/store'
+import { readMemorials } from '../sim/memorial'
+import { PastCats } from './Memorial'
 
 export function Adopt() {
   const adopt = useGame((s) => s.adopt)
   const [name, setName] = useState('')
+  const past = useMemo(() => readMemorials(), [])
 
   return (
     <div className="adopt">
@@ -14,7 +17,8 @@ export function Adopt() {
       </p>
       <p>
         Tem fome, sede, sono e limites. Ele não obedece: decide. Se você cuidar bem,
-        um dia ele vem dormir perto de você.
+        um dia ele vem dormir perto de você. Se você não cuidar, ele adoece — e
+        gato não reclama de dor.
       </p>
       <input
         value={name}
@@ -28,7 +32,9 @@ export function Adopt() {
       </button>
       <p className="fine">
         O tempo corre mesmo com o app fechado. Deixe ração e água antes de sair.
+        Ele esconde quando adoece — reparar é com você.
       </p>
+      <PastCats list={past} />
     </div>
   )
 }
