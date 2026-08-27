@@ -1,8 +1,10 @@
 name: Publicar no GitHub Pages
 
+# Disparo manual: a publicação no Pages exige ligar o Pages nas configurações
+# do repositório (Settings → Pages → Source: GitHub Actions). Sem isso o job
+# falha a cada push. O caminho recomendado hoje é a Vercel, que não precisa de
+# nenhuma configuração no GitHub — veja o README.
 on:
-  push:
-    branches: [claude/realistic-virtual-cat-app-wcqqk1, main]
   workflow_dispatch:
 
 permissions:

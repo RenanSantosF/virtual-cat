@@ -103,18 +103,29 @@ esculpido não puder ser carregado.
 
 ## Rodar
 
-### No celular, sem computador
+### No celular, sem computador — pela Vercel
 
-O repositório publica sozinho no GitHub Pages a cada push. Basta ligar o Pages
-uma vez:
+Não exige configurar nada no GitHub, e cada push republica sozinho.
 
-1. No GitHub, abra o repositório → **Settings** → **Pages**
-2. Em **Source**, escolha **GitHub Actions**
-3. Aguarde a aba **Actions** terminar o job "Publicar no GitHub Pages"
+1. Abra **vercel.com** no navegador do celular e entre com **Continue with
+   GitHub**
+2. **Add New…** → **Project**
+3. Encontre **virtual-cat** na lista e toque em **Import**
+4. Toque em **Deploy** sem mudar nada — o `vercel.json` já traz o build correto
 
-O app fica em `https://<usuário>.github.io/virtual-cat/`. Abra esse endereço no
-navegador do celular e use **Adicionar à tela de início** — a partir daí ele
-roda em tela cheia, offline, como um aplicativo.
+Em cerca de um minuto sai uma URL do tipo `virtual-cat-xxxx.vercel.app`. Abra,
+toque no menu do navegador e use **Adicionar à tela de início**: a partir daí o
+app roda em tela cheia e funciona sem internet.
+
+O branch de trabalho já é o padrão do repositório, então a Vercel o escolhe
+sozinho — não é preciso mexer em branch nenhum.
+
+### Alternativa: GitHub Pages
+
+O workflow `.github/workflows/deploy.yml` publica no Pages, mas só roda por
+disparo manual (aba **Actions** → **Run workflow**) e exige ligar o Pages antes,
+em **Settings → Pages → Source: GitHub Actions**. Sem esse passo o envio falha
+com `Ensure GitHub Pages has been enabled`.
 
 ### Localmente
 
@@ -140,7 +151,7 @@ node tools/uitest.mjs <dir>       # percorre a interface inteira e reporta erros
 node tools/offlinetest.mjs        # ausências de 8 h a 5 dias, até a perda
 node tools/deathtest.mjs <dir>    # confere que nenhuma tela entrega o diagnóstico
 node tools/fountaintest.mjs       # autonomia com e sem fonte de água
-node tools/pagestest.mjs <dir>    # serve o build num subdiretório, como o Pages faz
+node tools/deploytest.mjs <dir>   # serve o build como em produção e confere assets e PWA
 node tools/offlinepwa.mjs         # corta a rede e confere que o app ainda abre
 node tools/makeicons.mjs          # regenera os ícones do PWA
 ```

@@ -1,4 +1,5 @@
 import { chromium } from 'playwright'
+const URL_BASE = 'http://127.0.0.1:4190/'
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium',
   args: ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] })
 const ctx = await b.newContext({ viewport: { width: 400, height: 850 }, deviceScaleFactor: 2 })
@@ -9,7 +10,7 @@ p.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 160
 p.on('requestfailed', r => failed.push(r.url().slice(-60) + ' :: ' + r.failure()?.errorText))
 p.on('response', r => { if (r.status() >= 400) failed.push(r.status() + ' ' + r.url().slice(-60)) })
 
-await p.goto('http://127.0.0.1:4180/virtual-cat/', { waitUntil: 'networkidle' })
+await p.goto('http://127.0.0.1:4190/', { waitUntil: 'networkidle' })
 await p.fill('input', 'Teste')
 await p.click('button.btn')
 await p.waitForTimeout(6000)
