@@ -3,7 +3,10 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
-  base: './',
+  // Relativo por padrão, o que funciona ao abrir o `dist/` direto. Em produção
+  // o GitHub Pages serve o app em /<repositório>/, e o service worker precisa
+  // do caminho absoluto para registrar o escopo certo.
+  base: process.env.VITE_BASE ?? './',
   plugins: [
     react(),
     VitePWA({

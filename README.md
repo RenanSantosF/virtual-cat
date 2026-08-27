@@ -103,15 +103,30 @@ esculpido não puder ser carregado.
 
 ## Rodar
 
+### No celular, sem computador
+
+O repositório publica sozinho no GitHub Pages a cada push. Basta ligar o Pages
+uma vez:
+
+1. No GitHub, abra o repositório → **Settings** → **Pages**
+2. Em **Source**, escolha **GitHub Actions**
+3. Aguarde a aba **Actions** terminar o job "Publicar no GitHub Pages"
+
+O app fica em `https://<usuário>.github.io/virtual-cat/`. Abra esse endereço no
+navegador do celular e use **Adicionar à tela de início** — a partir daí ele
+roda em tela cheia, offline, como um aplicativo.
+
+### Localmente
+
 ```bash
 npm install
-npm run dev       # desenvolvimento
+npm run dev       # desenvolvimento em http://localhost:5173
 npm run build     # produção em dist/
-npm run preview   # servir o build
+npm run preview   # servir o build já compilado
 ```
 
-Para instalar no celular: abra o endereço no navegador e use "Adicionar à tela
-de início".
+O primeiro carregamento monta o esqueleto do modelo no aparelho e leva alguns
+segundos; depois disso o app abre direto.
 
 ## Ferramentas de desenvolvimento
 
