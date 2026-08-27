@@ -20,6 +20,8 @@ export interface Runtime {
   sayUntil: number
   /** Fase interna das animações procedurais. */
   phase: number
+  /** O gato já chegou ao destino? Antes disso o comportamento não executa. */
+  arrived: boolean
 }
 
 export function newRuntime(): Runtime {
@@ -32,6 +34,7 @@ export function newRuntime(): Runtime {
     say: null,
     sayUntil: 0,
     phase: 0,
+    arrived: true,
   }
 }
 
@@ -60,6 +63,43 @@ interface Candidate {
   id: BehaviorId
   score: number
   target?: [number, number] | null
+}
+
+/** O quanto ele quer chegar rápido a cada destino, 0..1. */
+const URGENCY: Partial<Record<BehaviorId, number>> = {
+  hide: 1,
+  run: 1,
+  litter: 0.8,
+  pounce: 1,
+  eat: 0.55,
+  drink: 0.45,
+  play: 0.7,
+  meow: 0.6,
+  rub: 0.5,
+  stalk: 0.15,
+  watch: 0.3,
+  sleep: 0.25,
+  doze: 0.2,
+  knead: 0.25,
+  groom: 0.2,
+  sit: 0.2,
+  walk: 0.3,
+  retch: 0.9,
+  limp: 0.1,
+}
+
+export function urgencyOf(id: BehaviorId, cat: CatState): number {
+  let u = URGENCY[id] ?? 0.3
+  // Necessidade no talo aumenta a pressa, seja qual for o destino.
+  if (id === 'litter') u = Math.max(u, 1 - cat.needs.bladder / 30)
+  if (id === 'eat') u = Math.max(u, 1 - cat.needs.hunger / 40)
+  if (cat.stress > 75) u = Math.max(u, 0.85)
+  return Math.max(0, Math.min(1, u))
+}
+
+/** Comportamentos em que ele se aproxima rastejando, não andando. */
+export function isCreeping(id: BehaviorId): boolean {
+  return id === 'stalk'
 }
 
 /**

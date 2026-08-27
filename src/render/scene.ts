@@ -5,12 +5,15 @@ import { GlbCatModel } from './glbcat'
 import { makeCoat, type Coat } from './coat'
 import { autoQuality, type Quality } from './fur'
 import { buildRoom, type RoomRefs } from './room'
-import { animate, type AnimContext } from './poses'
+import { createPost, type PostFX } from './post'
+import { animate, locomotionPose, type AnimContext, type MotionContext } from './poses'
+import { blendPose, FaceSmoother, PoseSmoother } from './poseblend'
 import { buildRig, defaultPose, TailSim, type Rig } from './rig'
 import { bodyScale, neotenyFactor, ageMonths } from '../sim/growth'
 import { advance, litterFilth } from '../sim/engine'
 import { sickness } from '../sim/symptoms'
-import { chooseBehavior, flavor, isStationary, locomote, type Runtime } from '../ai/brain'
+import { chooseBehavior, flavor, isCreeping, type Runtime, urgencyOf } from '../ai/brain'
+import { coordination, newMotion, speedFactor, stepMotion, type Motion } from '../ai/motion'
 import { petTick } from '../sim/actions'
 import { touch, touchHint } from '../sim/touch'
 import { ROOM } from '../sim/world'
@@ -32,6 +35,8 @@ export class CatScene {
   private scene = new THREE.Scene()
   private camera: THREE.PerspectiveCamera
   private room: RoomRefs
+  private post: PostFX | null = null
+  private night = 0
   private model?: CatModel
   private glb?: GlbCatModel
   private coat!: Coat
@@ -43,15 +48,20 @@ export class CatScene {
   private raf = 0
   private last = performance.now()
   private clock = 0
-  private stridePhase = 0
+  private motion: Motion = newMotion()
+  private poseSmoother = new PoseSmoother()
+  private faceSmoother = new FaceSmoother()
+  /** Destino atual e intenção que o gerou. */
+  private goal: [number, number] | null = null
+  private goalUrgency = 0
+  private goalCreep = false
+
   private brainTimer = 0
   private blinkTimer = 3
   private blinkProgress = 1
   private slowBlink = false
-  private prevPos = new THREE.Vector3()
   private bodyCenter = new THREE.Vector3()
   private firstFrame = true
-  private speed = 0
 
   // Câmera orbital
   private camYaw = 0.55
@@ -69,6 +79,8 @@ export class CatScene {
   toyMode = false
   /** Trava comportamento e posição — usado apenas nos testes visuais. */
   private frozen: string | null = null
+  /** Hora forçada, só para inspecionar a iluminação nos testes. */
+  private hourOverride: number | null = null
 
   constructor(canvas: HTMLCanvasElement, hooks: SceneHooks, seed: number) {
     this.hooks = hooks
@@ -82,7 +94,7 @@ export class CatScene {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.quality === 'high' ? 2 : 1.5))
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.15
+    this.renderer.toneMappingExposure = 1.05
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
 
@@ -103,6 +115,8 @@ export class CatScene {
     this.rebuildCat(seed)
 
     this.rig = buildRig(defaultPose(), 1)
+    this.post = createPost(this.renderer, this.scene, this.camera, this.quality)
+
     this.attachInput(canvas)
     this.resize()
     ;(window as unknown as { __catScene?: unknown }).__catScene = this
@@ -141,6 +155,22 @@ export class CatScene {
     }
   }
 
+  /** Quantas íris o gerador de piscada encontrou na textura. */
+  get blinkRegions() {
+    return this.glb?.blinkRegions ?? 0
+  }
+
+  /** Trava a abertura das pálpebras, para conferir o piscar nos testes. */
+  private blinkOverride: number | null = null
+  setBlink(v: number | null) {
+    this.blinkOverride = v
+  }
+
+  /** Força a hora do dia, para conferir a luz sem esperar anoitecer. */
+  setHour(h: number | null) {
+    this.hourOverride = h
+  }
+
   /** Congela o gato num comportamento e no centro da sala, para inspeção. */
   freeze(behavior: string | null) {
     this.frozen = behavior
@@ -151,6 +181,11 @@ export class CatScene {
     this.camYaw = yaw
     this.camPitch = pitch
     this.camDist = dist
+  }
+
+  /** Locomoção atual, para inspeção durante o desenvolvimento. */
+  get motionDebug() {
+    return this.motion
   }
 
   /** Estado vivo do gato, para inspeção durante o desenvolvimento. */
@@ -169,7 +204,12 @@ export class CatScene {
       const dt = Math.min(0.05, (now - this.last) / 1000)
       this.last = now
       this.update(dt)
-      this.renderer.render(this.scene, this.camera)
+      if (this.post) {
+        this.post.update(dt, this.night)
+        this.post.composer.render()
+      } else {
+        this.renderer.render(this.scene, this.camera)
+      }
     }
     this.raf = requestAnimationFrame(loop)
   }
@@ -185,10 +225,12 @@ export class CatScene {
     this.renderer.setSize(w, h, false)
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
+    this.post?.setSize(w, h, this.renderer.getPixelRatio())
   }
 
   dispose() {
     this.stop()
+    this.post?.dispose()
     this.model?.dispose()
     this.glb?.dispose()
     this.room.dispose()
@@ -318,7 +360,7 @@ export class CatScene {
       cat.target = null
     }
 
-    // --- Decisão: reavaliada 3 vezes por segundo, não a cada frame. ---
+    // --- Decisão: reavaliada 3 vezes por segundo, não a cada quadro. ---
     this.brainTimer -= dt
     if (!this.frozen && this.brainTimer <= 0) {
       this.brainTimer = 0.33
@@ -333,32 +375,35 @@ export class CatScene {
           rt.sayUntil = now + 2200
         }
       }
-      if (choice.target && !isStationary(choice.id)) cat.target = [...choice.target]
-      else if (choice.target && isStationary(choice.id)) {
-        // Comportamentos parados ainda exigem chegar ao lugar certo primeiro.
-        const dx = choice.target[0] - cat.pos[0]
-        const dz = choice.target[1] - cat.pos[1]
-        if (Math.hypot(dx, dz) > 0.18) cat.target = [...choice.target]
-      }
-      if (rt.lure && cat.behavior === 'stalk') cat.target = [...rt.lure]
+      // A intenção define para onde ir e com que pressa. Chegar lá é problema
+      // da locomoção — e o comportamento só começa depois que ele chega.
+      this.goal = choice.target ? [choice.target[0], choice.target[1]] : null
+      this.goalUrgency = urgencyOf(choice.id, cat)
+      this.goalCreep = isCreeping(choice.id)
+      if (rt.lure && cat.behavior === 'stalk') this.goal = [...rt.lure]
     }
 
-    if (!this.frozen) locomote(cat, dt)
+    // --- Locomoção ---
+    const coord = coordination(cat, now)
+    // Chegar ao destino é o que libera o comportamento: comer, beber e usar a
+    // caixa só acontecem de fato quando ele está junto do objeto.
+    const arrived = this.frozen
+      ? true
+      : stepMotion(cat, this.motion, {
+          target: this.goal,
+          urgency: this.goalUrgency,
+          creeping: this.goalCreep,
+          energy: cat.needs.energy / 100,
+          coord,
+          speedScale: speedFactor(cat, now),
+        }, dt)
+    cat.target = this.goal
+    rt.arrived = arrived
 
     // --- Escala por idade ---
     const scale = bodyScale(cat.birth, now)
     const neoteny = neotenyFactor(cat.birth, now)
     const months = ageMonths(cat.birth, now)
-
-    // --- Velocidade real, medida a partir do deslocamento ---
-    const worldPos = new THREE.Vector3(cat.pos[0], 0, cat.pos[1])
-    const inst = this.prevPos.distanceTo(worldPos) / Math.max(dt, 1e-4)
-    this.speed += (inst - this.speed) * Math.min(1, dt * 8)
-    this.prevPos.copy(worldPos)
-
-    // A frequência da passada vem da velocidade: o pé nunca patina no chão.
-    const strideDistance = 0.3 * scale
-    this.stridePhase = (this.stridePhase + (this.speed / strideDistance) * dt) % 1
 
     // --- Piscar ---
     this.blinkTimer -= dt
@@ -371,49 +416,75 @@ export class CatScene {
     const blinkSpeed = this.slowBlink ? 1.1 : 6.5
     this.blinkProgress = Math.min(1, this.blinkProgress + dt * blinkSpeed)
     const b = this.blinkProgress
-    const eyeOpen = b >= 1 ? 1 : 1 - Math.sin(b * Math.PI)
+    const eyeOpen = this.blinkOverride ?? (b >= 1 ? 1 : 1 - Math.sin(b * Math.PI))
 
     // --- Pose ---
     const ctx: AnimContext = {
       t: this.clock,
-      speed: this.speed,
+      speed: this.motion.speed,
       contentment: Math.max(0, Math.min(1, (cat.bond / 100) * 0.5 + (1 - cat.stress / 100) * 0.5)),
       stress: cat.stress / 100,
       energy: cat.needs.energy / 100,
-      stridePhase: this.stridePhase,
+      stridePhase: this.motion.stridePhase,
       blink: eyeOpen,
       kitten: months < 6 ? 1 - months / 6 : 0,
       sick: sickness(cat),
     }
-    const anim = animate(cat.behavior, ctx)
 
-    // O gato olha na direção do brinquedo ou de quem o toca.
-    if (rt.lure && (cat.behavior === 'stalk' || cat.behavior === 'watch' || cat.behavior === 'sit')) {
-      const dx = rt.lure[0] - cat.pos[0]
-      const dz = rt.lure[1] - cat.pos[1]
-      let rel = Math.atan2(dx, dz) - cat.facing
-      while (rel > Math.PI) rel -= Math.PI * 2
-      while (rel < -Math.PI) rel += Math.PI * 2
-      anim.pose.headYaw += Math.max(-0.9, Math.min(0.9, rel)) * 0.8
+    const mctx: MotionContext = {
+      gait: this.motion.gait,
+      speed: this.motion.speed,
+      stridePhase: this.motion.stridePhase,
+      wobble: this.motion.wobble,
+      stumble: this.motion.stumble,
+      coord,
+      turnRate: this.motion.turnRate,
+    }
+
+    // Enquanto se desloca, quem manda no corpo é a marcha; a atitude do
+    // comportamento entra por cima. Parado, é o contrário.
+    const behaviourAnim = animate(cat.behavior, ctx)
+    const moveAnim = locomotionPose(mctx, ctx)
+    const moveWeight = Math.min(1, this.motion.speed / 0.35)
+
+    const targetPose = moveWeight <= 0.001
+      ? behaviourAnim.pose
+      : blendPose(behaviourAnim.pose, moveAnim.pose, moveWeight)
+    const targetFace = moveWeight > 0.5 ? moveAnim.face : behaviourAnim.face
+    targetFace.eyeOpen = eyeOpen
+
+    const pose = this.poseSmoother.update(targetPose, dt, moveWeight)
+    const face = this.faceSmoother.update(targetFace, dt)
+
+    // O gato olha para onde vai, para o brinquedo, ou para quem o toca.
+    const lookAt = rt.lure ?? this.goal
+    if (lookAt) {
+      const dx = lookAt[0] - cat.pos[0]
+      const dz = lookAt[1] - cat.pos[1]
+      if (Math.hypot(dx, dz) > 0.15) {
+        let rel = Math.atan2(dx, dz) - cat.facing
+        while (rel > Math.PI) rel -= Math.PI * 2
+        while (rel < -Math.PI) rel += Math.PI * 2
+        pose.headYaw += Math.max(-0.8, Math.min(0.8, rel)) * 0.55
+      }
     }
 
     const active = this.glb ?? this.model
     if (this.glb) {
-      this.glb.update(anim.pose, dt, scale)
+      this.glb.update(pose, dt, scale, face)
     } else if (this.model) {
-      this.rig = buildRig(anim.pose, neoteny, this.rig)
+      this.rig = buildRig(pose, neoteny, this.rig)
       const dir = new THREE.Vector3()
       const root = this.model.tailRoot(this.rig, dir)
-      this.tailSim.step(root, dir, anim.pose, dt)
+      this.tailSim.step(root, dir, pose, dt)
       this.model.setTailPoints(this.tailSim.points)
-      this.model.update(this.rig, anim.face, scale)
+      this.model.update(this.rig, face, scale)
     }
     if (!active) return
     active.group.position.set(cat.pos[0], 0, cat.pos[1])
     active.group.rotation.y = cat.facing
 
-    // A câmera mira o centro real do corpo, não a posição dos pés: quando o
-    // gato se deita, o tronco sai de cima do ponto de apoio.
+    // A câmera mira o centro real do corpo, não a posição dos pés.
     if (this.glb) {
       this.glb.bodyCenter(this.bodyCenter)
     } else {
@@ -430,15 +501,48 @@ export class CatScene {
   }
 
   private updateProps(cat: CatState, now: number) {
-    // A luz muda com a hora real: o retângulo de sol some à noite, e a cena
-    // esfria. É a mesma pista que faz o gato despertar ao amanhecer.
-    const hour = new Date(now).getHours() + new Date(now).getMinutes() / 60
-    const day = Math.max(0, Math.sin(((hour - 6) / 12) * Math.PI))
-    const patch = this.room.sunPatch.material as THREE.MeshBasicMaterial
-    patch.opacity = 0.03 + day * 0.22
-    this.room.sun.intensity = 0.35 + day * 2.1
-    this.room.sun.color.setHSL(0.09 - day * 0.02, 0.45 - day * 0.2, 0.55 + day * 0.15)
-    this.scene.environmentIntensity = 0.28 + day * 0.4
+    // A luz muda com a hora real. O sol some à noite — e antes o cômodo ficava
+    // sem nenhuma fonte com direção, chapado e sem sombra alguma. Agora o
+    // abajur assume: a cena troca de fonte, não fica sem.
+    const d = new Date(now)
+    const hour = this.hourOverride ?? d.getHours() + d.getMinutes() / 60
+    // Curva de dia com platô: claro do começo da manhã ao fim da tarde, e só
+    // então caindo. Uma senoide pura deixava as cinco da tarde na penumbra.
+    const t = Math.max(0, Math.min(1, (hour - 5.5) / 13))
+    const day = Math.max(0, Math.min(1, Math.sin(t * Math.PI) * 1.9))
+    const night = 1 - Math.min(1, day * 2.2)
+    this.night = night
+
+    // O retângulo de sol no chão não é mais desenhado: ele agora é a sombra
+    // que a parede projeta em volta da abertura da janela.
+    this.room.sun.intensity = day * 3.0
+    this.room.sun.castShadow = day > 0.12
+    // Ao amanhecer e ao entardecer a luz entra rasante e alaranjada.
+    const low = Math.max(0, 1 - Math.abs(hour - 12.5) / 6.5)
+    this.room.sun.color.setHSL(0.055 + low * 0.02, 0.55 - day * 0.25, 0.5 + day * 0.2)
+    this.room.sun.position.set(
+      Math.sin((hour - 6) / 12 * Math.PI) * 1.6,
+      0.6 + day * 2.4,
+      -3.2,
+    )
+
+    this.room.lamp.intensity = night * 13
+    this.room.lamp.castShadow = night > 0.25
+    const shade = this.room.lampShade.material as THREE.MeshPhysicalMaterial
+    shade.emissiveIntensity = night * 1.6
+
+    // O céu visto pela janela acompanha a hora, senão a abertura vira um
+    // buraco azul-claro às duas da manhã.
+    const skyMat = this.room.sky.material as THREE.MeshBasicMaterial
+    skyMat.color.setHSL(0.58, 0.35 + day * 0.12, 0.06 + day * 0.62)
+
+    // As bases nunca caem a zero: mesmo de madrugada é preciso enxergar o gato.
+    this.room.hemi.intensity = 0.55 + day * 0.75
+    this.room.rim.intensity = 0.30 + day * 0.65
+    this.scene.environmentIntensity = 0.38 + day * 0.42
+    // O fundo acompanha, senão a janela vira um buraco branco à noite.
+    const bg = this.scene.background as THREE.Color
+    bg.setHSL(0.08, 0.16, 0.05 + day * 0.06)
 
     // Comida no pote: a pilha encolhe conforme ele come.
     const grams = cat.bowl.food

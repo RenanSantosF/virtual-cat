@@ -7,10 +7,12 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { largestComponent, toFloat32, usedPositions } from './meshclean'
 import { skeletonize, type ExtractedSkeleton } from './skeletonize'
+import { buildBlinkTextures, type BlinkTextures } from './blink'
 import { applyTargets, buildBones, computeSkinning, type RiggedSkeleton } from './glbrig'
 import { GlbPoser } from './glbpose'
 import { defaultPose, type PoseParams } from './rig'
 import type { TouchRegion } from '../sim/touch'
+import type { FacePose } from './poses'
 export { defaultPose }
 
 /** Comprimento do tronco de um gato adulto, do quadril ao pescoço, em metros. */
@@ -174,6 +176,12 @@ export class GlbCatModel {
     m.poser = new GlbPoser(m.rig, SPINE_BONES, NECK_BONES)
     m.modelScale = ADULT_BODY_LENGTH / m.poser.bodyLength
 
+    // As pálpebras usam a cor da própria pelagem: amostrada da textura do
+    // modelo, na região do rosto, para não destoarem seja qual for o gato.
+    m.rig.root.updateMatrixWorld(true)
+    onProgress?.('Preparando o olhar', 0.85)
+    if (phys.map) m.blinkTex = buildBlinkTextures(phys.map)
+
     const rootPos = new THREE.Vector3()
     const rootDir = new THREE.Vector3()
     m.poser.tailRoot(rootPos, rootDir)
@@ -205,7 +213,7 @@ export class GlbCatModel {
     return this.poser.withersHeight * this.modelScale
   }
 
-  update(pose: PoseParams, dt: number, scale: number) {
+  update(pose: PoseParams, dt: number, scale: number, face?: FacePose) {
     const rootPos = _v1
     const rootDir = _v2
     this.poser.tailRoot(rootPos, rootDir)
@@ -221,6 +229,7 @@ export class GlbCatModel {
     // partir da altura pedida — como o peito erguido do gato sentado.
     for (let iter = 0; iter < 3; iter++) {
       this.poser.build(pose, this.tail.points, offset, iter === 0 ? undefined : this.realRoots)
+      if (face) this.poser.poseEars(face.earBack, face.earTwitch)
       applyTargets(this.rig, this.poser.target, this.poser.worldQuaternions)
       this.rig.root.updateMatrixWorld(true)
 
@@ -272,6 +281,7 @@ export class GlbCatModel {
     }
     if (isFinite(lowest)) this.inner.position.y = -lowest
 
+    if (face) this.setBlink(face.eyeOpen)
     this.group.scale.setScalar(this.modelScale * scale)
   }
 
@@ -357,6 +367,33 @@ export class GlbCatModel {
   }
 
   /**
+   * Piscar.
+   *
+   * As variações de pálpebra são pintadas sobre a textura do próprio modelo no
+   * carregamento, e piscar é só trocar o mapa do material — sem geometria e
+   * sem custo por quadro. A malha traz os olhos pintados e nenhuma peça que se
+   * mexa: um bicho que nunca fecha os olhos é lido na hora como boneco, e era
+   * boa parte da sensação de coisa morta.
+   */
+  private blinkTex: BlinkTextures | null = null
+  private blinkState: 'open' | 'half' | 'shut' = 'open'
+
+  private setBlink(open: number) {
+    if (!this.blinkTex) return
+    const want: 'open' | 'half' | 'shut' = open > 0.66 ? 'open' : open > 0.28 ? 'half' : 'shut'
+    if (want === this.blinkState) return
+    this.blinkState = want
+    const mat = this.mesh.material as THREE.MeshPhysicalMaterial
+    mat.map = this.blinkTex[want]
+    mat.needsUpdate = true
+  }
+
+  /** Quantas íris foram encontradas na textura; zero significa que não pisca. */
+  get blinkRegions() {
+    return this.blinkTex?.regions ?? 0
+  }
+
+  /**
    * Que parte do corpo está sob um ponto tocado. Compara o ponto de impacto
    * com a posição atual de cada osso — assim a região acompanha a pose: a
    * barriga de um gato deitado está onde a pose a colocou, não onde estava no
@@ -417,6 +454,7 @@ export class GlbCatModel {
   }
 
   dispose() {
+    this.blinkTex?.dispose()
     this.mesh.geometry.dispose()
     ;(this.mesh.material as THREE.Material).dispose()
   }

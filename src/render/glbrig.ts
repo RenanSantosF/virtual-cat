@@ -20,6 +20,8 @@ export interface RiggedSkeleton {
   tail: BoneChain
   legs: BoneChain[]
   head: number
+  /** Ossos das orelhas, na ordem esquerda, direita. */
+  ears: number[]
   /** Posições do bind de todos os ossos, em espaço do modelo. */
   bindPos: THREE.Vector3[]
   /** Direção do bind de cada osso em relação ao pai. */
@@ -79,6 +81,14 @@ export function buildBones(skel: ExtractedSkeleton): RiggedSkeleton {
   const headIdx = add(skel.head, neckIdx[neckIdx.length - 1])
   const muzzleIdx = add(skel.muzzle, headIdx)
 
+  // --- Orelhas: penduradas na cabeça ---
+  const ears: number[] = []
+  for (const ear of skel.ears) {
+    const base = add(ear.base, headIdx)
+    ears.push(base)
+    add(ear.tip, base)
+  }
+
   // --- Cauda: pendurada na base da coluna ---
   const tailPts = resample(skel.tail, TAIL_BONES + 1)
   const tailIdx: number[] = []
@@ -124,6 +134,8 @@ export function buildBones(skel: ExtractedSkeleton): RiggedSkeleton {
   link(spineIdx.concat(neckIdx, [headIdx, muzzleIdx]))
   link(tailIdx)
   for (const leg of legs) link(leg.idx)
+  // Cada orelha é uma cadeia de dois ossos: base e ponta.
+  for (const e of ears) link([e, e + 1])
 
   const skeleton = new THREE.Skeleton(bones)
 
@@ -135,6 +147,7 @@ export function buildBones(skel: ExtractedSkeleton): RiggedSkeleton {
     tail: { idx: tailIdx, bind: tailIdx.map((k) => bindPos[k].clone()) },
     legs,
     head: headIdx,
+    ears,
     bindPos,
     bindDir,
     parent,

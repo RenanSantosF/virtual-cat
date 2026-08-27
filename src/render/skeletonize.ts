@@ -10,6 +10,10 @@ export interface ExtractedSkeleton {
   tail: THREE.Vector3[]
   /** [ombro/quadril, cotovelo/joelho, tornozelo, pata] × 4, na ordem FL, FR, BL, BR. */
   legs: THREE.Vector3[][]
+  /** Base e ponta de cada orelha, na ordem esquerda, direita. */
+  ears: Array<{ base: THREE.Vector3; tip: THREE.Vector3 }>
+  /** Centro de cada olho, sobre a superfície do crânio. */
+  eyes: THREE.Vector3[]
   /** Medidas úteis para calibrar a simulação contra o modelo. */
   metrics: {
     bodyLength: number
@@ -151,11 +155,25 @@ export function skeletonize(P: Float32Array): ExtractedSkeleton {
   // --- Pernas ---
   const legs = extractLegs(P, N, maxY, zAt(hipIdx), zAt(neckIdx), spineRes)
 
+  // --- Orelhas ---
+  // São as duas pontas que sobem acima da linha do crânio, uma de cada lado do
+  // plano sagital. Achá-las dá dois ossos que valem muito: orelha achatada é o
+  // sinal de humor mais legível que um gato tem.
+  const ears = extractEars(P, N, neckZv, head, hTop)
+
+  // --- Olhos ---
+  // A malha não diz onde eles estão, mas a anatomia diz: no terço da frente do
+  // crânio, acima do eixo e afastados do plano sagital. A posição é projetada
+  // sobre a superfície para as pálpebras assentarem na cara, não dentro dela.
+  const eyes = estimateEyes(P, N, head, muzzle)
+
   const withers = Math.max(...spineRes.map((p) => p.y))
   return {
     spine: spineRes,
     head,
     muzzle,
+    ears,
+    eyes,
     tail: tailPts,
     legs,
     metrics: {
@@ -167,6 +185,66 @@ export function skeletonize(P: Float32Array): ExtractedSkeleton {
       neckZ: zAt(neckIdx),
     },
   }
+}
+
+/** As duas pontas mais altas da cabeça, uma de cada lado do plano sagital. */
+function extractEars(
+  P: Float32Array, N: number, neckZ: number, head: THREE.Vector3, hTop: number,
+): Array<{ base: THREE.Vector3; tip: THREE.Vector3 }> {
+  const out: Array<{ base: THREE.Vector3; tip: THREE.Vector3 }> = []
+  const cut = head.y + (hTop - head.y) * 0.42
+  for (const side of [-1, 1]) {
+    const acc = { x: 0, y: 0, z: 0, n: 0 }
+    let tip: THREE.Vector3 | null = null
+    let best = -Infinity
+    for (let i = 0; i < N; i++) {
+      const x = P[i * 3]
+      const y = P[i * 3 + 1]
+      const z = P[i * 3 + 2]
+      if (z <= neckZ || y < cut) continue
+      if (Math.sign(x) !== side || Math.abs(x) < 0.004) continue
+      acc.x += x
+      acc.y += y
+      acc.z += z
+      acc.n++
+      if (y > best) {
+        best = y
+        tip = new THREE.Vector3(x, y, z)
+      }
+    }
+    if (acc.n < 12 || !tip) {
+      // Sem orelha detectável, um par plausível mantém o rig válido.
+      const b = new THREE.Vector3(side * 0.03, head.y + 0.02, head.z - 0.01)
+      out.push({ base: b, tip: b.clone().add(new THREE.Vector3(side * 0.01, 0.04, 0)) })
+      continue
+    }
+    out.push({ base: new THREE.Vector3(acc.x / acc.n, cut, acc.z / acc.n), tip })
+  }
+  return out
+}
+
+/** Posição estimada dos olhos, assentada sobre a superfície do crânio. */
+function estimateEyes(
+  P: Float32Array, N: number, head: THREE.Vector3, muzzle: THREE.Vector3,
+): THREE.Vector3[] {
+  const fwd = muzzle.clone().sub(head)
+  const len = fwd.length() || 0.01
+  fwd.normalize()
+  const seed = head.clone().addScaledVector(fwd, len * 0.45)
+  seed.y += len * 0.30
+
+  // Meia-largura do crânio nessa fatia, medida na própria malha.
+  let halfW = 0
+  let n = 0
+  for (let i = 0; i < N; i++) {
+    if (Math.abs(P[i * 3 + 2] - seed.z) > len * 0.22) continue
+    if (Math.abs(P[i * 3 + 1] - seed.y) > len * 0.35) continue
+    halfW += Math.abs(P[i * 3])
+    n++
+  }
+  halfW = n > 20 ? (halfW / n) * 1.55 : len * 0.5
+
+  return [-1, 1].map((side) => new THREE.Vector3(side * halfW, seed.y, seed.z))
 }
 
 /**

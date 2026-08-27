@@ -31,16 +31,18 @@ export interface AnimContext {
   sick: number
 }
 
-type Gait = { phases: [number, number, number, number]; duty: number; stride: number; lift: number }
+import type { Gait } from '../ai/motion'
+
+type GaitDef = { phases: [number, number, number, number]; duty: number; stride: number; lift: number }
 
 /** Sequência lateral: traseira, dianteira do mesmo lado, depois o outro lado. */
-const WALK: Gait = { phases: [0.25, 0.75, 0.0, 0.5], duty: 0.62, stride: 0.072, lift: 0.024 }
-const TROT: Gait = { phases: [0.0, 0.5, 0.5, 0.0], duty: 0.46, stride: 0.10, lift: 0.038 }
+const WALK: GaitDef = { phases: [0.25, 0.75, 0.0, 0.5], duty: 0.62, stride: 0.072, lift: 0.024 }
+const TROT: GaitDef = { phases: [0.0, 0.5, 0.5, 0.0], duty: 0.46, stride: 0.10, lift: 0.038 }
 /** Galope saltado: as duas traseiras impulsionam quase juntas. */
-const BOUND: Gait = { phases: [0.0, 0.1, 0.52, 0.6], duty: 0.34, stride: 0.15, lift: 0.07 }
-const STALK: Gait = { phases: [0.0, 0.5, 0.25, 0.75], duty: 0.74, stride: 0.046, lift: 0.016 }
+const BOUND: GaitDef = { phases: [0.0, 0.1, 0.52, 0.6], duty: 0.34, stride: 0.15, lift: 0.07 }
+const STALK: GaitDef = { phases: [0.0, 0.5, 0.25, 0.75], duty: 0.74, stride: 0.046, lift: 0.016 }
 
-function applyGait(pose: PoseParams, g: Gait, phase: number, bounce: { y: number }) {
+function applyGait(pose: PoseParams, g: GaitDef, phase: number, bounce: { y: number }) {
   let support = 0
   for (let i = 0; i < 4; i++) {
     const p = (phase + g.phases[i]) % 1
@@ -58,6 +60,122 @@ function applyGait(pose: PoseParams, g: Gait, phase: number, bounce: { y: number
     }
   }
   bounce.y = support < 2 ? -0.014 : 0.003
+}
+
+const GAIT_DEF: Record<Exclude<Gait, 'still'>, GaitDef> = {
+  creep: STALK,
+  walk: WALK,
+  trot: TROT,
+  run: BOUND,
+}
+
+export interface MotionContext {
+  gait: Gait
+  speed: number
+  stridePhase: number
+  /** Oscilação lateral do filhote sem firmeza nas pernas. */
+  wobble: number
+  /** 0..1 — tropeço em andamento. */
+  stumble: number
+  /** 0..1 — coordenação motora por idade. */
+  coord: number
+  /** Curva sendo feita, em rad/s: o corpo se inclina para dentro dela. */
+  turnRate: number
+}
+
+/**
+ * A pose de quem está se deslocando.
+ *
+ * Fica separada da pose de comportamento porque as duas coisas são
+ * independentes: o gato pode estar indo comer, indo brincar ou fugindo, e em
+ * todos os casos as pernas fazem a mesma coisa — andar. O que muda é a atitude
+ * do tronco, da cabeça e da cauda, e essa vem do comportamento.
+ */
+export function locomotionPose(m: MotionContext, ctx: AnimContext): Anim {
+  const pose = defaultPose()
+  const face: FacePose = { eyeOpen: ctx.blink, pupil: 0.32, jaw: 0, earBack: 0, earTwitch: 0, whisker: 0.55 }
+  const bounce = { y: 0 }
+
+  if (m.gait !== 'still') {
+    applyGait(pose, GAIT_DEF[m.gait], m.stridePhase, bounce)
+  }
+
+  const t = ctx.t
+  pose.height = 1
+
+  // Passo mais curto e cauteloso enquanto a coordenação não firmou.
+  if (m.coord < 1) {
+    const clumsy = 1 - m.coord
+    for (let i = 0; i < 4; i++) {
+      pose.legReach[i] *= 1 - clumsy * 0.45
+      pose.legLift[i] *= 1 - clumsy * 0.25
+    }
+    // Corpo bambo: o filhote balança de lado a cada passo e sobra pouca firmeza.
+    pose.bend += m.wobble * 0.55
+    pose.headRoll += m.wobble * 0.4
+    pose.height -= clumsy * 0.06
+    pose.tuckBack += clumsy * 0.12
+  }
+
+  // Tropeço: o corpo cede para a frente e se recompõe.
+  if (m.stumble > 0) {
+    const s = Math.sin(m.stumble * Math.PI)
+    pose.height -= s * 0.22
+    pose.pitch -= s * 0.18
+    pose.headPitch += s * 0.3
+    pose.tailLift += s * 0.5
+  }
+
+  // Inclinação para dentro da curva, como qualquer corpo que muda de direção.
+  const lean = Math.max(-0.35, Math.min(0.35, m.turnRate * 0.11))
+  pose.bend -= lean
+  pose.headYaw += lean * 0.9
+
+  switch (m.gait) {
+    case 'creep':
+      pose.height = 0.55
+      pose.arch = 0.1
+      pose.neck = 0.5
+      pose.headPitch = -0.05
+      face.pupil = 1
+      face.whisker = 1
+      pose.tailLift = -0.45
+      pose.tailCurl = 0.1
+      pose.tailFlick = 0.9
+      pose.tailSway = t * 5
+      pose.bend += Math.sin(t * 4.5) * 0.1
+      break
+    case 'walk':
+      pose.bend += Math.sin(m.stridePhase * Math.PI * 2) * 0.06
+      pose.headYaw += Math.sin(m.stridePhase * Math.PI * 2) * 0.045
+      pose.tailLift = 0.25
+      pose.tailFlick = 0.2
+      pose.tailSway = t * 1.1
+      break
+    case 'trot':
+      pose.bend += Math.sin(m.stridePhase * Math.PI * 2) * 0.09
+      pose.neck = 0.95
+      pose.tailLift = 0.45
+      pose.tailFlick = 0.35
+      pose.tailSway = t * 2.2
+      break
+    case 'run':
+      // No galope a coluna é uma mola: flexiona e estende a cada salto.
+      pose.arch = Math.sin(m.stridePhase * Math.PI * 2) * 0.38
+      pose.neck = 0.8
+      pose.headPitch = -0.12
+      face.earBack = 0.45
+      face.pupil = 0.9
+      pose.tailLift = 0.5
+      pose.tailCurl = 0.15
+      pose.tailFlick = 0.1
+      break
+    default:
+      break
+  }
+
+  pose.height += bounce.y / A.standHeight
+  return { pose, face }
 }
 
 export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
@@ -298,20 +416,19 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
       break
     }
     case 'stalk': {
-      // Rastejando: barriga quase raspando o chão, quadril balançando.
-      pose.height = 0.55
-      pose.pitch = 0.05
-      pose.arch = 0.1
-      pose.neck = 0.5
+      // Espreitando parado: corpo baixo, olhos fixos, quadril balançando antes
+      // do bote. O rastejar em si é marcha, e vem da camada de locomoção.
+      pose.height = 0.5
+      pose.arch = 0.12
+      pose.neck = 0.45
       pose.headPitch = -0.05
       face.pupil = 1
       face.whisker = 1
       face.earBack = 0
-      applyGait(pose, STALK, ctx.stridePhase, bounce)
-      pose.bend = Math.sin(t * 4.5) * 0.1
+      pose.bend = Math.sin(t * 4.5) * 0.12
       pose.tailLift = -0.45
       pose.tailCurl = 0.1
-      pose.tailFlick = 0.9
+      pose.tailFlick = 1
       pose.tailSway = t * 5
       break
     }
@@ -332,7 +449,6 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
       break
     }
     case 'play': {
-      applyGait(pose, TROT, ctx.stridePhase, bounce)
       pose.height = 1.0
       pose.bend = Math.sin(t * 3) * 0.18
       face.pupil = 0.85
@@ -343,9 +459,6 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
       break
     }
     case 'run': {
-      applyGait(pose, BOUND, ctx.stridePhase, bounce)
-      // No galope a coluna é uma mola: flexiona e estende a cada salto.
-      pose.arch = Math.sin(ctx.stridePhase * Math.PI * 2) * 0.38
       pose.height = 1.0
       pose.headPitch = -0.12
       pose.neck = 0.85
@@ -356,10 +469,7 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
       break
     }
     case 'walk': {
-      applyGait(pose, ctx.speed > 1.1 ? TROT : WALK, ctx.stridePhase, bounce)
       pose.height = 1.0
-      pose.bend = Math.sin(ctx.stridePhase * Math.PI * 2) * 0.06
-      pose.headYaw = Math.sin(ctx.stridePhase * Math.PI * 2) * 0.04
       break
     }
     case 'retch': {
@@ -396,12 +506,7 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
       break
     }
     case 'limp': {
-      // Mancando: passada curta, cabeça baixa, dorso levemente arqueado.
-      applyGait(pose, WALK, ctx.stridePhase, bounce)
-      for (let i = 0; i < 4; i++) {
-        pose.legReach[i] *= 0.55
-        pose.legLift[i] *= 0.5
-      }
+      // Mancando: cabeça baixa, dorso arqueado, cauda derrubada.
       pose.height = 0.88
       pose.arch = 0.16
       pose.neck = 0.6

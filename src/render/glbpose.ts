@@ -199,6 +199,9 @@ export class GlbPoser {
       .normalize()
     T[this.muzzleIdx].copy(T[this.headIdx]).addScaledVector(muzzleDir, muzzleLen)
 
+    // Guarda a rotação da cabeça: orelhas e olhos penduram-se nela.
+    this.headQuat.setFromUnitVectors(bindDir, headDir)
+
   }
 
   buildLegs(pose: PoseParams, rootOverride?: THREE.Vector3[]) {
@@ -270,6 +273,43 @@ export class GlbPoser {
     }
 
   }
+
+  /**
+   * Orienta as orelhas. Erguidas e viradas para a frente quando ele está
+   * atento; achatadas contra o crânio quando está com medo ou irritado — que é
+   * a informação de humor mais direta que um gato dá.
+   */
+  poseEars(earBack: number, twitch: number) {
+    const T = this.target as THREE.Vector3[]
+    this.rig.ears.forEach((base, i) => {
+      const tip = base + 1
+      const side = i === 0 ? -1 : 1
+      const bindDir = this.rig.bindPos[tip].clone().sub(this.rig.bindPos[base])
+      const len = bindDir.length()
+      bindDir.normalize()
+
+      // A cabeça pode ter girado: a orelha acompanha.
+      const headQ = this.headQuat
+      const dir = bindDir.clone()
+        .applyEuler(new THREE.Euler(
+          earBack * 1.25,
+          side * (earBack * 0.55 - twitch * 0.05),
+          side * -earBack * 0.5,
+          'YXZ',
+        ))
+        .applyQuaternion(headQ)
+        .normalize()
+
+      T[base].copy(T[this.headIdx]).addScaledVector(
+        this.rig.bindPos[base].clone().sub(this.rig.bindPos[this.headIdx]).applyQuaternion(headQ).normalize(),
+        this.rig.bindPos[base].distanceTo(this.rig.bindPos[this.headIdx]),
+      )
+      T[tip].copy(T[base]).addScaledVector(dir, len)
+    })
+  }
+
+  /** Rotação atual da cabeça, para pendurar orelhas e olhos nela. */
+  private headQuat = new THREE.Quaternion()
 
   /** Ponto de fixação e direção inicial da cauda, já na pose atual. */
   tailRoot(out: THREE.Vector3, outDir: THREE.Vector3) {

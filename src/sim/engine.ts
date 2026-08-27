@@ -1,6 +1,7 @@
 import { metabolism, ADOPTION_AGE, MS_DAY, ageMonths } from './growth'
 import { makePersonality } from './personality'
 import { clamp } from './random'
+import { dist, SPOTS } from './world'
 import type { CatState, Illness, IllnessKind, NeedKey } from './types'
 
 export const STATE_VERSION = 1
@@ -140,16 +141,20 @@ export function advance(cat: CatState, now: number): CatState {
 
   const steps = Math.min(Math.floor(elapsed / (STEP * 1000)), 90_000)
   let t = cat.lastTick
+  // Numa recuperação de tempo perdido não há posição para conferir: o gato
+  // andou por toda a casa nesse intervalo. Ao vivo é diferente — comer exige
+  // estar junto do pote, senão ele se alimenta de longe, sem sair do lugar.
+  const catchup = steps > 1
 
   for (let s = 0; s < steps; s++) {
     t += STEP * 1000
-    stepOnce(cat, t, STEP / 3600)
+    stepOnce(cat, t, STEP / 3600, catchup)
   }
   cat.lastTick = t
   return cat
 }
 
-function stepOnce(cat: CatState, now: number, hours: number) {
+function stepOnce(cat: CatState, now: number, hours: number, catchup: boolean) {
   const n = cat.needs
   const meta = metabolism(cat.birth, now)
   const months = ageMonths(cat.birth, now)
@@ -177,7 +182,7 @@ function stepOnce(cat: CatState, now: number, hours: number) {
   if (cat.behavior === 'groom') n.hygiene = clamp(n.hygiene + 40 * hours)
 
   sleepCycle(cat, now)
-  autonomy(cat, now, hours)
+  autonomy(cat, now, hours, catchup)
   healthStep(cat, now, hours)
 }
 
@@ -212,13 +217,19 @@ function sleepCycle(cat: CatState, now: number) {
  * O que o gato faz sozinho, sem você. Roda também durante o catch-up offline:
  * é por isso que você pode deixar ração e água e voltar horas depois.
  */
-function autonomy(cat: CatState, now: number, hours: number) {
+/** Está perto o bastante de um lugar para usá-lo? */
+function atSpot(cat: CatState, spot: [number, number]): boolean {
+  return dist(cat.pos, spot) < 0.42
+}
+
+function autonomy(cat: CatState, now: number, hours: number, catchup: boolean) {
   const n = cat.needs
   const p = cat.personality
 
   // --- Comer ---
   const appetiteThreshold = 55 + p.gluttony * 25
-  if (n.hunger < appetiteThreshold && cat.bowl.food > 0 && cat.stress < 85) {
+  const canEat = catchup || (cat.behavior === 'eat' && atSpot(cat, SPOTS.bowl))
+  if (canEat && n.hunger < appetiteThreshold && cat.bowl.food > 0 && cat.stress < 85) {
     const spoil = foodSpoilage(cat, now)
     const nutrition = cat.bowl.foodKind === 'wet' ? 1.3 : cat.bowl.foodKind === 'treat' ? 0.7 : 1
     const perGram = POINTS_PER_GRAM * nutrition * (1 - spoil * 0.7)
@@ -240,7 +251,8 @@ function autonomy(cat: CatState, now: number, hours: number) {
   }
 
   // --- Beber ---
-  if (n.thirst < 62 && cat.bowl.water > 0) {
+  const canDrink = catchup || (cat.behavior === 'drink' && atSpot(cat, SPOTS.water))
+  if (canDrink && n.thirst < 62 && cat.bowl.water > 0) {
     // A fonte mantém a água circulando: ela não envelhece, e é exatamente por
     // isso que donos de gato compram uma.
     const circulating = (cat.inventory.items.fountain ?? 0) > 0
@@ -254,7 +266,8 @@ function autonomy(cat: CatState, now: number, hours: number) {
   }
 
   // --- Caixa de areia ---
-  if (n.bladder < 18) {
+  const canRelieve = catchup || (cat.behavior === 'litter' && atSpot(cat, SPOTS.litter))
+  if (canRelieve && n.bladder < 18) {
     const filth = litterFilth(cat, now)
     if (filth < 0.85) {
       n.bladder = 100
