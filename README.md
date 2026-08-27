@@ -151,6 +151,7 @@ node tools/uitest.mjs <dir>       # percorre a interface inteira e reporta erros
 node tools/offlinetest.mjs        # ausências de 8 h a 5 dias, até a perda
 node tools/deathtest.mjs <dir>    # confere que nenhuma tela entrega o diagnóstico
 node tools/fountaintest.mjs       # autonomia com e sem fonte de água
+node tools/roomshot.mjs <dir>     # vistas amplas do cômodo, para julgar a ambientação
 node tools/deploytest.mjs <dir>   # serve o build como em produção e confere assets e PWA
 node tools/offlinepwa.mjs         # corta a rede e confere que o app ainda abre
 node tools/makeicons.mjs          # regenera os ícones do PWA
