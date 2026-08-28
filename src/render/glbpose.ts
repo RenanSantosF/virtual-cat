@@ -156,7 +156,10 @@ export class GlbPoser {
     // O corpo não afunda no chão.
     let lowest = Infinity
     for (const i of S) lowest = Math.min(lowest, T[i].y)
-    const floor = this.groundY + (this.baseY - this.groundY) * 0.30
+    // O mesmo patamar que o assentamento usa como referência do tronco
+    // deitado. Com dois números diferentes, um empurrava para cima o que o
+    // outro puxava para baixo, e o ajuste de altura nunca fechava.
+    const floor = this.restTrunkY
     if (lowest < floor) {
       const fix = floor - lowest
       for (const i of S) T[i].y += fix

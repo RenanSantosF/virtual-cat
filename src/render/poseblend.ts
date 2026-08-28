@@ -57,6 +57,16 @@ const RATE = {
 
 export class PoseSmoother {
   private cur: PoseParams = defaultPose()
+  /**
+   * Cópia entregue a quem chama.
+   *
+   * Devolver o estado interno era um bug sutil e caro: as camadas de cima —
+   * o olhar e a vida de fundo — somam seus deslocamentos na pose recebida, e
+   * se ela for o próprio estado, a soma do quadro anterior entra como ponto de
+   * partida do seguinte. O deslocamento realimenta, e o que era um giro de
+   * cabeça de 8° virava 86°: o gato dormia de pé com o pescoço torcido.
+   */
+  private out: PoseParams = defaultPose()
   private started = false
 
   /** Salta direto para a pose, sem transição. Usado no primeiro quadro. */
@@ -73,7 +83,7 @@ export class PoseSmoother {
   update(target: PoseParams, dt: number, strideAuthority = 0): PoseParams {
     if (!this.started) {
       this.snap(target)
-      return this.cur
+      return blendPose(this.cur, this.cur, 0, this.out)
     }
     const c = this.cur
     const h = Math.min(dt, 1 / 20)
@@ -106,13 +116,15 @@ export class PoseSmoother {
         c.legReach[i] = approach(c.legReach[i], target.legReach[i], rate, h)
       }
     }
-    return c
+    return blendPose(c, c, 0, this.out)
   }
 }
 
 /** O rosto também não muda de expressão num quadro. */
 export class FaceSmoother {
   private cur: FacePose = { eyeOpen: 1, pupil: 0.35, jaw: 0, earBack: 0, earTwitch: 0, whisker: 0.4 }
+  /** Cópia entregue a quem chama, pelo mesmo motivo da pose. */
+  private out: FacePose = { eyeOpen: 1, pupil: 0.35, jaw: 0, earBack: 0, earTwitch: 0, whisker: 0.4 }
   private started = false
 
   update(target: FacePose, dt: number): FacePose {
@@ -121,7 +133,7 @@ export class FaceSmoother {
     if (!this.started) {
       Object.assign(c, target)
       this.started = true
-      return c
+      return Object.assign(this.out, c)
     }
     // Piscar é rápido de propósito: suavizar a pálpebra apagaria a piscada.
     c.eyeOpen = target.eyeOpen
@@ -130,6 +142,6 @@ export class FaceSmoother {
     c.earBack = approach(c.earBack, target.earBack, 6, h)
     c.earTwitch = target.earTwitch
     c.whisker = approach(c.whisker, target.whisker, 4, h)
-    return c
+    return Object.assign(this.out, c)
   }
 }

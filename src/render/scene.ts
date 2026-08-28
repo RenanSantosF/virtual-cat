@@ -5,10 +5,12 @@ import { GlbCatModel } from './glbcat'
 import { makeCoat, type Coat } from './coat'
 import { autoQuality, type Quality } from './fur'
 import { buildRoom, type RoomRefs } from './room'
+import { contactShadowTexture } from './textures'
 import { createPost, type PostFX } from './post'
 import { animate, locomotionPose, type AnimContext, type MotionContext } from './poses'
 import { blendPose, FaceSmoother, PoseSmoother } from './poseblend'
-import { buildRig, defaultPose, TailSim, type Rig } from './rig'
+import { applyIdleLife, newAttention, updateAttention, type Attention } from './idlelife'
+import { buildRig, defaultPose, TailSim, type PoseParams, type Rig } from './rig'
 import { bodyScale, neotenyFactor, ageMonths } from '../sim/growth'
 import { advance, litterFilth } from '../sim/engine'
 import { sickness } from '../sim/symptoms'
@@ -55,18 +57,22 @@ export class CatScene {
   private goal: [number, number] | null = null
   private goalUrgency = 0
   private goalCreep = false
+  private attention: Attention = newAttention()
 
   private brainTimer = 0
   private blinkTimer = 3
   private blinkProgress = 1
+  /** Rotação da cabeça em direção ao alvo do olhar, suavizada. */
+  private gaze = 0
   private slowBlink = false
   private bodyCenter = new THREE.Vector3()
+  private catShadow!: THREE.Mesh
   private firstFrame = true
 
   // Câmera orbital
   private camYaw = 0.55
-  private camPitch = 0.42
-  private camDist = 2.3
+  private camPitch = 0.30
+  private camDist = 2.2
   private camTarget = new THREE.Vector3(0, 0.16, 0)
 
   private pointers = new Map<number, { x: number; y: number }>()
@@ -79,6 +85,9 @@ export class CatScene {
   toyMode = false
   /** Trava comportamento e posição — usado apenas nos testes visuais. */
   private frozen: string | null = null
+  /** Última pose efetivamente aplicada, para inspeção durante o desenvolvimento. */
+  lastPose: PoseParams | null = null
+  lastTarget: PoseParams | null = null
   /** Hora forçada, só para inspecionar a iluminação nos testes. */
   private hourOverride: number | null = null
 
@@ -94,7 +103,7 @@ export class CatScene {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.quality === 'high' ? 2 : 1.5))
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.05
+    this.renderer.toneMappingExposure = 0.98
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
 
@@ -108,9 +117,21 @@ export class CatScene {
     this.scene.environmentIntensity = 0.55
     pmrem.dispose()
 
-    this.camera = new THREE.PerspectiveCamera(38, 1, 0.05, 40)
+    this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 40)
     this.room = buildRoom()
     this.scene.add(this.room.group)
+
+    const shadowTex = contactShadowTexture()
+    this.catShadow = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.62, 0.44),
+      new THREE.MeshBasicMaterial({
+        map: shadowTex, transparent: true, opacity: 0.5,
+        depthWrite: false, blending: THREE.NormalBlending,
+      }),
+    )
+    this.catShadow.rotation.x = -Math.PI / 2
+    this.catShadow.renderOrder = 2
+    this.scene.add(this.catShadow)
 
     this.rebuildCat(seed)
 
@@ -156,6 +177,11 @@ export class CatScene {
   }
 
   /** Alcance de cada osso no skinning, para caçar deformação. */
+  /** Onde as patas e o tronco realmente pararam, na pose atual. */
+  poseProbe() {
+    return this.glb && this.lastPose ? this.glb.probeFeet(this.lastPose) : null
+  }
+
   boneInfluence() {
     return this.glb?.boneInfluence()
   }
@@ -461,13 +487,31 @@ export class CatScene {
       ? behaviourAnim.pose
       : blendPose(behaviourAnim.pose, moveAnim.pose, moveWeight)
     const targetFace = moveWeight > 0.5 ? moveAnim.face : behaviourAnim.face
-    targetFace.eyeOpen = eyeOpen
+    // A piscada não pode ABRIR um olho que o comportamento fechou: sobrescrever
+    // aqui deixava o gato de olhos arregalados enquanto dormia.
+    targetFace.eyeOpen = Math.min(targetFace.eyeOpen, eyeOpen)
 
+    this.lastTarget = targetPose
     const pose = this.poseSmoother.update(targetPose, dt, moveWeight)
     const face = this.faceSmoother.update(targetFace, dt)
 
-    // O gato olha para onde vai, para o brinquedo, ou para quem o toca.
-    const lookAt = rt.lure ?? this.goal
+    // --- Para onde ele olha ---
+    // Andando, olha para onde vai. Parado, varre a sala e para em coisas
+    // específicas: a janela, o pote, você. É o que dá a impressão de que existe
+    // alguém decidindo lá dentro.
+    // Dormindo não se olha para nada: a cabeça já está posta contra o flanco
+    // pela própria pose, e somar o olhar por cima torcia o pescoço do gato
+    // adormecido.
+    const awake = cat.behavior === 'sleep' ? 0 : cat.behavior === 'doze' ? 0.3 : 1
+    updateAttention(this.attention, cat, now, rt.lure)
+    let lookAt: [number, number] | null = null
+    if (awake < 0.05) lookAt = null
+    else if (moveWeight > 0.3 && this.goal) lookAt = this.goal
+    else if (this.attention.atCamera) {
+      // A câmera está atrás e acima: projeta no chão para virar um alvo.
+      lookAt = [this.camera.position.x, this.camera.position.z]
+    } else lookAt = this.attention.target
+
     if (lookAt) {
       const dx = lookAt[0] - cat.pos[0]
       const dz = lookAt[1] - cat.pos[1]
@@ -475,10 +519,29 @@ export class CatScene {
         let rel = Math.atan2(dx, dz) - cat.facing
         while (rel > Math.PI) rel -= Math.PI * 2
         while (rel < -Math.PI) rel += Math.PI * 2
-        pose.headYaw += Math.max(-0.8, Math.min(0.8, rel)) * 0.55
+        // A cabeça vira só até certo ponto; além disso o gato giraria o corpo.
+        const want = Math.max(-1.0, Math.min(1.0, rel)) * 0.62
+        this.gaze += (want - this.gaze) * Math.min(1, dt * 3.4)
       }
+    } else {
+      this.gaze += (0 - this.gaze) * Math.min(1, dt * 2)
     }
+    pose.headYaw += this.gaze * awake
 
+    // --- Vida de fundo ---
+    // Depois da suavização, de propósito: estes movimentos têm amplitude
+    // pequena e frequência própria, e passar pelo suavizador os apagaria.
+    applyIdleLife(pose, face, {
+      t: this.clock,
+      moving: moveWeight,
+      asleep: cat.behavior === 'sleep' ? 1 : cat.behavior === 'doze' ? 0.6 : 0,
+      energy: cat.needs.energy / 100,
+      stress: cat.stress / 100,
+      sick: ctx.sick,
+      kitten: ctx.kitten,
+    })
+
+    this.lastPose = pose
     const active = this.glb ?? this.model
     if (this.glb) {
       this.glb.update(pose, dt, scale, face)
@@ -493,6 +556,15 @@ export class CatScene {
     if (!active) return
     active.group.position.set(cat.pos[0], 0, cat.pos[1])
     active.group.rotation.y = cat.facing
+
+    // Sombra de contato: a mancha escura logo abaixo do corpo, que o mapa de
+    // sombras não resolve porque ali a luz não chega de direção nenhuma. Sem
+    // ela o gato fica colado por cima do chão em vez de apoiado nele.
+    this.catShadow.position.set(cat.pos[0], 0.004, cat.pos[1])
+    this.catShadow.rotation.z = -cat.facing
+    this.catShadow.scale.setScalar(scale * 1.15)
+    const lift = Math.max(0, this.motion.speed) * 0.12
+    ;(this.catShadow.material as THREE.MeshBasicMaterial).opacity = 0.5 - lift
 
     // A câmera mira o centro real do corpo, não a posição dos pés.
     if (this.glb) {
@@ -579,12 +651,21 @@ export class CatScene {
     // primeiro quadro salta direto, senão o app abre com a câmera dentro do chão.
     const follow = this.firstFrame ? 1 : Math.min(1, dt * 2.2)
     this.camTarget.lerp(this.bodyCenter, follow)
-    const d = this.camDist * (0.55 + scale * 0.55)
+    // A câmera chega mais perto do filhote, mas não tanto quanto o tamanho
+    // dele sugeriria: colada nele, o enquadramento virava um recorte de
+    // assoalho e a sala inteira ficava fora de quadro.
+    const d = this.camDist * (0.74 + scale * 0.36)
     const x = this.camTarget.x + Math.sin(this.camYaw) * Math.cos(this.camPitch) * d
     const y = this.camTarget.y + Math.sin(this.camPitch) * d
     const z = this.camTarget.z + Math.cos(this.camYaw) * Math.cos(this.camPitch) * d
     this.camera.position.lerp(new THREE.Vector3(x, y, z), this.firstFrame ? 1 : Math.min(1, dt * 6))
-    this.camera.lookAt(this.camTarget)
+    // A mira sobe um pouco acima do gato, o que o desce no quadro. O painel de
+    // necessidades ocupa o alto da tela; com a mira no corpo, o gato ficava
+    // atrás dele e a metade de baixo era chão vazio.
+    _look.copy(this.camTarget).y += d * 0.17
+    this.camera.lookAt(_look)
     this.firstFrame = false
   }
 }
+
+const _look = new THREE.Vector3()

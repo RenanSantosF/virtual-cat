@@ -323,6 +323,20 @@ export function applyTargets(
     inv.copy(parentQ).invert()
     rig.bones[b].quaternion.copy(inv).multiply(worldQuat[b])
   }
+
+  // Translação rígida da raiz.
+  //
+  // As rotações acima dizem que forma o corpo tem, e nada mais: o osso do
+  // quadril continuava exatamente onde foi esculpido, quaisquer que fossem os
+  // alvos. Era por isso que `height` mudava o desenho da coluna sem mudar a
+  // altura do corpo — o gato "deitado" ficava com as patas dobradas e o tronco
+  // na mesma altura de quando estava em pé, e o resultado na tela era um gato
+  // dormindo agachado. A cadeia inteira pende deste osso: pôr a raiz no alvo
+  // leva o corpo junto.
+  const rootIdx = rig.parent.indexOf(-1)
+  const rootTarget = rootIdx >= 0 ? target[rootIdx] : null
+  if (rootTarget) rig.bones[rootIdx].position.copy(rootTarget)
+
   rig.root.updateMatrixWorld(true)
 }
 

@@ -166,16 +166,21 @@ export class GlbCatModel {
     mat.roughness = Math.min(1, mat.roughness ?? 1)
     // A textura do modelo já traz o pelo; um leve brilho de veludo assenta a
     // superfície sob a luz do cômodo sem competir com ela.
+    // Pelo não é tecido fosco: tem brilho de veludo forte no contorno e quase
+    // nenhum de frente, e o relevo da textura precisa aparecer. É a combinação
+    // de sheen alto com rugosidade média que faz a superfície ler como pelagem
+    // em vez de plástico ou papel.
     const phys = new THREE.MeshPhysicalMaterial({
       map: mat.map,
       normalMap: mat.normalMap,
+      normalScale: new THREE.Vector2(1.35, 1.35),
       roughnessMap: mat.roughnessMap,
-      aoMap: mat.aoMap,
-      roughness: 0.95,
+      roughness: 0.84,
       metalness: 0,
-      sheen: 0.6,
-      sheenRoughness: 0.5,
-      sheenColor: new THREE.Color(0xffeedd),
+      sheen: 1,
+      sheenRoughness: 0.32,
+      sheenColor: new THREE.Color(0xfff0dc),
+      envMapIntensity: 0.85,
     })
 
     const sk = new THREE.SkinnedMesh(geo, phys)
@@ -235,6 +240,7 @@ export class GlbCatModel {
 
     const support = this.poser.supportFeet(pose)
     let offset = this.settle
+    let prevWorst = Infinity
 
     // Assentamento iterativo. Cada passada constrói a pose, orienta os ossos e
     // mede onde a pata mais alta realmente parou; a diferença vira a altura do
@@ -271,6 +277,11 @@ export class GlbCatModel {
         worst = lowestTrunk - this.poser.restTrunkY
       }
       if (!isFinite(worst) || Math.abs(worst) < 0.004) break
+      // Se mexer na altura não muda o resultado, é porque outra restrição está
+      // segurando o corpo. Insistir só faria o deslocamento crescer sem efeito
+      // até saturar, e aí o gato sobe sozinho.
+      if (iter > 0 && Math.abs(worst - prevWorst) < 1e-4) break
+      prevWorst = worst
       offset = Math.max(-0.35, Math.min(0.35, offset - worst * 0.9))
     }
     // Guardado entre quadros: a pose seguinte começa perto da solução.
@@ -337,7 +348,6 @@ export class GlbCatModel {
    * ossos não consegue reproduzir o alvo — normalmente por comprimento.
    */
   probeFeet(pose: PoseParams): unknown {
-    this.settle = 0
     this.update(pose, 1 / 60, 1)
     const world = new THREE.Vector3()
     const out: Record<string, unknown> = { ground: +this.groundLevel.toFixed(4) }
@@ -354,6 +364,11 @@ export class GlbCatModel {
     })
     const S = this.rig.spine.idx
     out.quadrilY = +this.poser.target[S[0]]!.y.toFixed(4)
+    out.apoios = this.poser.supportFeet(pose).length
+    out.restTrunkY = +this.poser.restTrunkY.toFixed(4)
+    out.restFootY = +this.restFootY.toFixed(4)
+    out.innerY = +this.inner.position.y.toFixed(4)
+    out.settle = +this.settle.toFixed(4)
     out.pescocoY = +this.poser.target[S[SPINE_BONES - 1]]!.y.toFixed(4)
     return out
   }

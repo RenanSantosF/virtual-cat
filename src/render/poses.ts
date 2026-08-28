@@ -209,13 +209,20 @@ export function animate(behavior: BehaviorId, ctx: AnimContext): Anim {
       pose.height = 0.30
       pose.pitch = 0.04
       pose.curl = 0.18
-      pose.bend = 0.55
+      // A torção lateral é o que mais castiga a deformação linear: acima de
+      // ~0.35 a carne do flanco se abre num vinco branco. O "pão de forma"
+      // pede pouca torção — quem faz a leitura de gato dormindo é a altura do
+      // corpo e a cabeça baixa, não o corpo torcido.
+      pose.bend = 0.30
       pose.tuckFront = 1
       pose.tuckBack = 1
       pose.neck = 0.35
-      pose.headPitch = 0.30
-      pose.headYaw = 0.55
-      pose.headRoll = 0.35
+      // Cabeça baixa e o queixo recolhido; a virada para o flanco é discreta.
+      // Girar muito a cabeça sobre um pescoço encolhido estica a malha do
+      // pescoço e deforma a orelha do lado de dentro da curva.
+      pose.headPitch = 0.46
+      pose.headYaw = 0.24
+      pose.headRoll = 0.14
       face.eyeOpen = 0
       face.earBack = 0.3
       face.earTwitch *= 0.12

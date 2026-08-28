@@ -48,9 +48,9 @@ export function woodFloorTexture(size = 2048): { map: THREE.CanvasTexture; rough
 
       const v = (0.72 + grain * 0.42 + fine) * pk.tone * seamDark * (1 - knotMask * 0.45)
       const i = (y * size + x) * 4
-      d[i] = Math.min(255, 176 * v * pk.warm)
-      d[i + 1] = Math.min(255, 132 * v)
-      d[i + 2] = Math.min(255, 92 * v * (2 - pk.warm))
+      d[i] = Math.min(255, 163 * v * pk.warm)
+      d[i + 1] = Math.min(255, 133 * v)
+      d[i + 2] = Math.min(255, 105 * v * (2 - pk.warm))
       d[i + 3] = 255
     }
   }

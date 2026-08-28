@@ -18,6 +18,36 @@ export interface RoomRefs {
   dispose(): void
 }
 
+/**
+ * Caixa de cantos arredondados.
+ *
+ * Nenhum móvel estofado tem aresta viva, e é exatamente a aresta viva que
+ * denuncia geometria feita às pressas: o realce de luz corre reto na quina e o
+ * objeto parece papelão. Arredondar custa alguns polígonos e resolve.
+ */
+function roundedBox(w: number, h: number, d: number, r = 0.05): THREE.BufferGeometry {
+  const rr = Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001)
+  const shape = new THREE.Shape()
+  const x = w / 2 - rr
+  const y = h / 2 - rr
+  shape.moveTo(-x, -y - rr)
+  shape.lineTo(x, -y - rr)
+  shape.quadraticCurveTo(x + rr, -y - rr, x + rr, -y)
+  shape.lineTo(x + rr, y)
+  shape.quadraticCurveTo(x + rr, y + rr, x, y + rr)
+  shape.lineTo(-x, y + rr)
+  shape.quadraticCurveTo(-x - rr, y + rr, -x - rr, y)
+  shape.lineTo(-x - rr, -y)
+  shape.quadraticCurveTo(-x - rr, -y - rr, -x, -y - rr)
+  const g = new THREE.ExtrudeGeometry(shape, {
+    depth: d - rr * 2, bevelEnabled: true, bevelThickness: rr, bevelSize: rr,
+    bevelSegments: 3, curveSegments: 6,
+  })
+  g.translate(0, 0, -(d - rr * 2) / 2)
+  g.computeVertexNormals()
+  return g
+}
+
 const WALL_H = 2.5
 
 /** Mancha de contato sob um objeto, para ele parecer apoiado e não flutuando. */
@@ -181,17 +211,84 @@ export function buildRoom(): RoomRefs {
   group.add(rod)
 
   // --- Tapete: cilindro achatado com trama, não um disco pintado no chão ---
-  const rugMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.92, 0.94, 0.016, 56),
-    new THREE.MeshStandardMaterial({
-      map: rug.map, bumpMap: rug.bump, bumpScale: 0.4, roughness: 1, metalness: 0,
-      color: 0x9aa79f,
-    }),
-  )
-  rugMesh.position.set(-0.15, 0.008, 0.3)
+  const rugMat = new THREE.MeshStandardMaterial({
+    map: rug.map, bumpMap: rug.bump, bumpScale: 0.5, roughness: 1, metalness: 0,
+    color: 0xd8ccb4,
+  })
+  const rugMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.86, 0.88, 0.014, 56), rugMat)
+  rugMesh.position.set(-0.15, 0.007, 0.34)
   rugMesh.receiveShadow = true
   rugMesh.castShadow = true
   group.add(rugMesh)
+
+  // Barra mais escura na borda. Um tapete de uma cor só é uma mancha no chão;
+  // a barra é o que faz o olho ler "peça de decoração" e não "textura".
+  const rugBand = new THREE.Mesh(
+    new THREE.RingGeometry(0.815, 0.872, 56),
+    new THREE.MeshStandardMaterial({
+      map: rug.map, bumpMap: rug.bump, bumpScale: 0.5, roughness: 1,
+      color: 0xb0977a, side: THREE.DoubleSide,
+    }),
+  )
+  rugBand.rotation.x = -Math.PI / 2
+  rugBand.position.set(-0.15, 0.0152, 0.34)
+  group.add(rugBand)
+
+  // --- Sofá ---
+  // Uma sala sem um móvel grande é uma caixa com objetos soltos dentro. É ele
+  // que dá escala ao gato e faz o cômodo parecer habitado.
+  const sofa = new THREE.Group()
+  const fabric = new THREE.MeshStandardMaterial({ color: 0x8d938c, roughness: 0.94, metalness: 0 })
+  const fabricLight = new THREE.MeshStandardMaterial({ color: 0x9aa199, roughness: 0.92, metalness: 0 })
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x5a3f2b, roughness: 0.5 })
+  const SL = 1.7   // comprimento, ao longo de z
+  const SD = 0.72  // profundidade, ao longo de x
+  const base = new THREE.Mesh(roundedBox(SD, 0.26, SL, 0.05), fabric)
+  base.position.set(0, 0.30, 0)
+  sofa.add(base)
+  // Duas almofadas de assento, com uma fresta entre elas.
+  for (const z of [-SL / 4 - 0.01, SL / 4 + 0.01]) {
+    const cush = new THREE.Mesh(roundedBox(SD - 0.06, 0.16, SL / 2 - 0.04, 0.06), fabricLight)
+    cush.position.set(0.02, 0.50, z)
+    cush.castShadow = true
+    sofa.add(cush)
+  }
+  const backRest = new THREE.Mesh(roundedBox(0.20, 0.62, SL, 0.07), fabric)
+  backRest.position.set(-SD / 2 + 0.10, 0.66, 0)
+  backRest.castShadow = true
+  sofa.add(backRest)
+  for (const z of [-SL / 2 + 0.09, SL / 2 - 0.09]) {
+    const arm = new THREE.Mesh(roundedBox(SD, 0.34, 0.18, 0.08), fabric)
+    arm.position.set(0, 0.60, z)
+    arm.castShadow = true
+    sofa.add(arm)
+  }
+  for (const [lx, lz] of [[-0.22, -SL / 2 + 0.12], [0.22, -SL / 2 + 0.12], [-0.22, SL / 2 - 0.12], [0.22, SL / 2 - 0.12]]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.022, 0.17, 8), legMat)
+    leg.position.set(lx, 0.085, lz)
+    sofa.add(leg)
+  }
+  base.castShadow = true
+  base.receiveShadow = true
+  sofa.position.set(-ROOM.halfW + 0.02, 0, 0.1)
+  group.add(sofa)
+  contact(group, contactTex, sofa.position.x, sofa.position.z + 0.1, 1.1, 0.85)
+
+  // Manta jogada sobre o braço do sofá — o detalhe que diz que alguém mora
+  // aqui. Cai dos dois lados do braço, senão vira uma barra flutuando.
+  const throwMat = new THREE.MeshStandardMaterial({ color: 0xb8705d, roughness: 0.99 })
+  const armZ = 0.1 + SL / 2 - 0.09
+  const throwTop = new THREE.Mesh(roundedBox(SD + 0.06, 0.035, 0.30, 0.015), throwMat)
+  throwTop.position.set(-ROOM.halfW + 0.02, 0.782, armZ)
+  throwTop.castShadow = true
+  group.add(throwTop)
+  for (const [dz, rot] of [[0.155, 0.22], [-0.155, -0.22]] as Array<[number, number]>) {
+    const fall = new THREE.Mesh(roundedBox(SD + 0.05, 0.26, 0.035, 0.015), throwMat)
+    fall.position.set(-ROOM.halfW + 0.02, 0.66, armZ + dz)
+    fall.rotation.x = rot
+    fall.castShadow = true
+    group.add(fall)
+  }
 
   // --- Potes ---
   const ceramic = new THREE.MeshPhysicalMaterial({
@@ -241,17 +338,24 @@ export function buildRoom(): RoomRefs {
 
   // --- Caixa de areia ---
   const boxMat = new THREE.MeshStandardMaterial({ color: 0x5c6772, roughness: 0.65 })
-  const litterBox = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.14, 0.35), boxMat)
-  litterBox.position.set(SPOTS.litter[0], 0.07, SPOTS.litter[1])
+  const litterBox = new THREE.Mesh(new THREE.LatheGeometry([
+    new THREE.Vector2(0, 0), new THREE.Vector2(0.2, 0), new THREE.Vector2(0.22, 0.02),
+    new THREE.Vector2(0.245, 0.15), new THREE.Vector2(0.25, 0.17),
+    new THREE.Vector2(0.235, 0.17), new THREE.Vector2(0.215, 0.03), new THREE.Vector2(0, 0.02),
+  ], 6), boxMat)
+  litterBox.rotation.y = Math.PI / 6
+  litterBox.scale.set(1, 1, 0.78)
+  litterBox.position.set(SPOTS.litter[0], 0, SPOTS.litter[1])
   litterBox.castShadow = true
   litterBox.receiveShadow = true
   group.add(litterBox)
   const litterSurface = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.42, 0.31),
+    new THREE.CircleGeometry(0.2, 6),
     new THREE.MeshStandardMaterial({ color: 0xd9d3c5, roughness: 1 }),
   )
   litterSurface.rotation.x = -Math.PI / 2
-  litterSurface.position.set(SPOTS.litter[0], 0.125, SPOTS.litter[1])
+  litterSurface.rotation.z = Math.PI / 6
+  litterSurface.position.set(SPOTS.litter[0], 0.075, SPOTS.litter[1])
   litterSurface.receiveShadow = true
   group.add(litterSurface)
   contact(group, contactTex, SPOTS.litter[0], SPOTS.litter[1], 0.34, 0.9)
@@ -315,8 +419,8 @@ export function buildRoom(): RoomRefs {
     wall.receiveShadow = true
     boxGroup.add(wall)
   }
-  boxGroup.position.set(-ROOM.halfW + 0.42, 0, -ROOM.halfD + 0.55)
-  boxGroup.rotation.y = 0.42
+  boxGroup.position.set(ROOM.halfW - 0.75, 0, -ROOM.halfD + 0.6)
+  boxGroup.rotation.y = -0.5
   group.add(boxGroup)
   contact(group, contactTex, boxGroup.position.x, boxGroup.position.z, 0.3, 1)
 
@@ -347,6 +451,94 @@ export function buildRoom(): RoomRefs {
   lampShade.rotation.x = Math.PI
   group.add(lampShade)
   contact(group, contactTex, lampX, lampZ, 0.2, 0.8)
+
+  // --- Planta: folhas curvadas, não bolhas empilhadas ---
+  const potMat = new THREE.MeshStandardMaterial({ color: 0xa8674a, roughness: 0.72 })
+  const potX = -ROOM.halfW + 0.38
+  const potZ = -ROOM.halfD + 0.42
+  const pot = new THREE.Mesh(
+    new THREE.LatheGeometry([
+      new THREE.Vector2(0, 0), new THREE.Vector2(0.085, 0), new THREE.Vector2(0.095, 0.02),
+      new THREE.Vector2(0.108, 0.16), new THREE.Vector2(0.115, 0.19), new THREE.Vector2(0.105, 0.19),
+      new THREE.Vector2(0.098, 0.17), new THREE.Vector2(0, 0.15),
+    ], 24), potMat)
+  pot.position.set(potX, 0, potZ)
+  pot.castShadow = true
+  pot.receiveShadow = true
+  group.add(pot)
+  const soil = new THREE.Mesh(
+    new THREE.CircleGeometry(0.098, 20),
+    new THREE.MeshStandardMaterial({ color: 0x3a2b20, roughness: 1 }),
+  )
+  soil.rotation.x = -Math.PI / 2
+  soil.position.set(potX, 0.17, potZ)
+  group.add(soil)
+
+  const leafMat = new THREE.MeshPhysicalMaterial({
+    color: 0x4f7a41, roughness: 0.45, sheen: 0.6,
+    sheenColor: new THREE.Color(0x9fd08a), side: THREE.DoubleSide,
+    clearcoat: 0.3, clearcoatRoughness: 0.5,
+  })
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2 + 0.4
+    const lean = 0.5 + (i % 3) * 0.22
+    const h = 0.24 + (i % 4) * 0.07
+    // Cada folha é um plano curvado, não uma esfera achatada.
+    const leaf = new THREE.Mesh(new THREE.PlaneGeometry(0.075, h, 3, 8), leafMat)
+    const posAttr = leaf.geometry.attributes.position as THREE.BufferAttribute
+    for (let v = 0; v < posAttr.count; v++) {
+      const y = posAttr.getY(v) / h + 0.5
+      const x = posAttr.getX(v)
+      // Afina para a ponta e dobra pelo próprio peso.
+      posAttr.setX(v, x * (1 - y * 0.72))
+      posAttr.setZ(v, -Math.pow(y, 2) * h * 0.55)
+    }
+    posAttr.needsUpdate = true
+    leaf.geometry.computeVertexNormals()
+    leaf.position.set(potX, 0.18 + h * 0.45, potZ)
+    leaf.rotation.set(-lean * 0.55, a, Math.sin(a) * 0.2)
+    leaf.castShadow = true
+    group.add(leaf)
+  }
+  contact(group, contactTex, potX, potZ, 0.22, 0.9)
+
+  // --- Quadro na parede: quebra o vazio e dá altura à sala ---
+  const frameOuter = new THREE.Mesh(
+    new THREE.BoxGeometry(0.42, 0.54, 0.025),
+    new THREE.MeshStandardMaterial({ color: 0x2f2823, roughness: 0.5 }),
+  )
+  frameOuter.position.set(-1.35, 1.45, -D + 0.05)
+  frameOuter.castShadow = true
+  group.add(frameOuter)
+  const canvasArt = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.36, 0.48),
+    new THREE.MeshStandardMaterial({ color: 0xb9a684, roughness: 0.85 }),
+  )
+  canvasArt.position.set(-1.35, 1.45, -D + 0.066)
+  group.add(canvasArt)
+
+  // --- Almofada de chão: volume de verdade, com pregas ---
+  const cushionMat = new THREE.MeshPhysicalMaterial({
+    color: 0x9c8f7d, roughness: 1, sheen: 1, sheenColor: new THREE.Color(0xd8cbb6),
+    bumpMap: rug.bump, bumpScale: 0.35,
+  })
+  const cushion = new THREE.Mesh(new THREE.SphereGeometry(0.22, 24, 16), cushionMat)
+  // Achatada como almofada usada, com um vinco no meio.
+  const cpos = cushion.geometry.attributes.position as THREE.BufferAttribute
+  for (let i = 0; i < cpos.count; i++) {
+    const y = cpos.getY(i)
+    const r = Math.hypot(cpos.getX(i), cpos.getZ(i))
+    cpos.setY(i, y * (1 - Math.max(0, 1 - r / 0.2) * 0.25))
+  }
+  cpos.needsUpdate = true
+  cushion.geometry.computeVertexNormals()
+  cushion.scale.set(1, 0.34, 0.92)
+  cushion.position.set(-1.45, 0.072, 0.15)
+  cushion.rotation.y = 0.5
+  cushion.castShadow = true
+  cushion.receiveShadow = true
+  group.add(cushion)
+  contact(group, contactTex, -1.45, 0.15, 0.26, 1.25)
 
   // --- Brinquedo (varinha), aparece só quando o jogador usa ---
   const toy = new THREE.Group()
