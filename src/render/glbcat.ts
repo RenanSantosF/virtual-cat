@@ -143,7 +143,21 @@ export class GlbCatModel {
     m.rig = buildBones(skel)
 
     onProgress?.('Calculando a deformação', 0.6)
-    const skin = computeSkinning(geo.attributes.position as THREE.BufferAttribute, m.rig)
+    // Ossos que não carregam carne.
+    //
+    // O focinho existe só para orientar a cabeça. As orelhas saíram junto: dar
+    // movimento a elas exigia detectá-las na malha com precisão, e qualquer
+    // erro de alguns milímetros na base fazia a orelha esticar como uma aba de
+    // couro e amassar a cara. O ganho — orelha achatando com o medo — não paga
+    // o risco de deformar o gato inteiro. A cabeça fica íntegra.
+    const directional = new Set<number>([
+      m.rig.spine.idx[m.rig.spine.idx.length - 1],
+      ...m.rig.ears,
+      ...m.rig.ears.map((b) => b + 1),
+    ])
+    const skin = computeSkinning(
+      geo.attributes.position as THREE.BufferAttribute, m.rig, directional,
+    )
     geo.setAttribute('skinIndex', skin.skinIndex)
     geo.setAttribute('skinWeight', skin.skinWeight)
 
@@ -229,7 +243,6 @@ export class GlbCatModel {
     // partir da altura pedida — como o peito erguido do gato sentado.
     for (let iter = 0; iter < 3; iter++) {
       this.poser.build(pose, this.tail.points, offset, iter === 0 ? undefined : this.realRoots)
-      if (face) this.poser.poseEars(face.earBack, face.earTwitch)
       applyTargets(this.rig, this.poser.target, this.poser.worldQuaternions)
       this.rig.root.updateMatrixWorld(true)
 
@@ -351,6 +364,39 @@ export class GlbCatModel {
     return lowest
   }
 
+  /**
+   * Alcance real de cada osso no skinning: quantos vértices ele domina e a que
+   * distância chegam. Um osso pequeno com alcance grande é o que amassa o
+   * modelo quando gira.
+   */
+  boneInfluence(): unknown {
+    const geo = this.mesh.geometry
+    const pos = geo.getAttribute('position') as THREE.BufferAttribute
+    const si = geo.getAttribute('skinIndex') as THREE.BufferAttribute
+    const sw = geo.getAttribute('skinWeight') as THREE.BufferAttribute
+    const names = this.boneNames()
+    const stat = new Map<number, { n: number; far: number }>()
+    const v = new THREE.Vector3()
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i)
+      for (let k = 0; k < 4; k++) {
+        const w = sw.getComponent(i, k)
+        if (w < 0.25) continue
+        const b = si.getComponent(i, k)
+        const e = stat.get(b) ?? { n: 0, far: 0 }
+        e.n++
+        e.far = Math.max(e.far, v.distanceTo(this.rig.bindPos[b]))
+        stat.set(b, e)
+      }
+    }
+    const out: Record<string, unknown> = {}
+    for (const [b, e] of stat) {
+      if (!/ear|head|muzzle|neck/.test(names[b])) continue
+      out[names[b] + '#' + b] = { verts: e.n, alcance: +e.far.toFixed(3) }
+    }
+    return out
+  }
+
   boneNames(): string[] {
     const names = new Array<string>(this.rig.bones.length).fill('?')
     this.rig.spine.idx.forEach((b, i) => {
@@ -359,6 +405,10 @@ export class GlbCatModel {
         : i === SPINE_BONES + NECK_BONES ? 'head' : 'muzzle'
     })
     this.rig.tail.idx.forEach((b, i) => { names[b] = `tail${i}` })
+    this.rig.ears.forEach((b, i) => {
+      names[b] = `ear${i}base`
+      names[b + 1] = `ear${i}tip`
+    })
     const legNames = ['FL', 'FR', 'BL', 'BR']
     this.rig.legs.forEach((L, k) => {
       L.idx.forEach((b, i) => { names[b] = `${legNames[k]}${['root', 'knee', 'ankle', 'paw'][i]}` })

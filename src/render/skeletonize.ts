@@ -187,12 +187,51 @@ export function skeletonize(P: Float32Array): ExtractedSkeleton {
   }
 }
 
-/** As duas pontas mais altas da cabeça, uma de cada lado do plano sagital. */
+/**
+ * As orelhas, e só elas.
+ *
+ * Cortar a cabeça numa altura fixa não funciona: pega o topo do crânio junto,
+ * e o osso resultante atravessa a cabeça inteira — cada orelha passava a
+ * dominar mais de oito mil vértices e amassava a cara ao girar.
+ *
+ * O que separa orelha de crânio é a existência de um vale no meio: descendo do
+ * alto da cabeça, enquanto houver duas massas afastadas do plano sagital são
+ * orelhas; quando elas se juntam no meio, chegou-se ao crânio.
+ */
 function extractEars(
   P: Float32Array, N: number, neckZ: number, head: THREE.Vector3, hTop: number,
 ): Array<{ base: THREE.Vector3; tip: THREE.Vector3 }> {
-  const out: Array<{ base: THREE.Vector3; tip: THREE.Vector3 }> = []
-  const cut = head.y + (hTop - head.y) * 0.42
+  // Largura da cabeça, para saber o que é "perto do plano sagital".
+  let headHalfW = 0
+  for (let i = 0; i < N; i++) {
+    if (P[i * 3 + 2] > neckZ) headHalfW = Math.max(headHalfW, Math.abs(P[i * 3]))
+  }
+  const nearMid = headHalfW * 0.16
+
+  // Desce do topo procurando a altura em que o vale central se fecha.
+  const LAYERS = 24
+  const top = hTop
+  const bottom = head.y
+  let split = bottom
+  for (let k = 0; k < LAYERS; k++) {
+    const y = top - ((k + 0.5) / LAYERS) * (top - bottom)
+    let mid = 0
+    let total = 0
+    for (let i = 0; i < N; i++) {
+      if (P[i * 3 + 2] <= neckZ) continue
+      const yy = P[i * 3 + 1]
+      if (Math.abs(yy - y) > (top - bottom) / LAYERS) continue
+      total++
+      if (Math.abs(P[i * 3]) < nearMid) mid++
+    }
+    // O vale fechou: daqui para baixo já é crânio.
+    if (total > 40 && mid > total * 0.14) {
+      split = y
+      break
+    }
+  }
+
+  const found: Array<{ base: THREE.Vector3; tip: THREE.Vector3; n: number } | null> = []
   for (const side of [-1, 1]) {
     const acc = { x: 0, y: 0, z: 0, n: 0 }
     let tip: THREE.Vector3 | null = null
@@ -201,8 +240,8 @@ function extractEars(
       const x = P[i * 3]
       const y = P[i * 3 + 1]
       const z = P[i * 3 + 2]
-      if (z <= neckZ || y < cut) continue
-      if (Math.sign(x) !== side || Math.abs(x) < 0.004) continue
+      if (z <= neckZ || y < split) continue
+      if (Math.sign(x) !== side || Math.abs(x) < nearMid * 0.5) continue
       acc.x += x
       acc.y += y
       acc.z += z
@@ -213,14 +252,31 @@ function extractEars(
       }
     }
     if (acc.n < 12 || !tip) {
-      // Sem orelha detectável, um par plausível mantém o rig válido.
-      const b = new THREE.Vector3(side * 0.03, head.y + 0.02, head.z - 0.01)
-      out.push({ base: b, tip: b.clone().add(new THREE.Vector3(side * 0.01, 0.04, 0)) })
+      found.push(null)
       continue
     }
-    out.push({ base: new THREE.Vector3(acc.x / acc.n, cut, acc.z / acc.n), tip })
+    // A base fica no pé da orelha, não no centro da massa dela.
+    found.push({ base: new THREE.Vector3(acc.x / acc.n, split, acc.z / acc.n), tip, n: acc.n })
   }
-  return out
+
+  // Um gato é simétrico, mas a varredura raramente encontra os dois lados
+  // igualmente bem — e um osso de orelha bom de um lado com outro torto do
+  // outro deformava só metade da cabeça. O lado mais bem resolvido é espelhado
+  // para o outro.
+  const best = found[0] && found[1]
+    ? (found[0]!.n >= found[1]!.n ? found[0]! : found[1]!)
+    : (found[0] ?? found[1])
+  if (!best) {
+    const b = new THREE.Vector3(headHalfW * 0.55, split, head.z - 0.01)
+    return [-1, 1].map((side) => ({
+      base: new THREE.Vector3(side * b.x, b.y, b.z),
+      tip: new THREE.Vector3(side * b.x, b.y + (top - split) * 0.9, b.z),
+    }))
+  }
+  return [-1, 1].map((side) => ({
+    base: new THREE.Vector3(side * Math.abs(best.base.x), best.base.y, best.base.z),
+    tip: new THREE.Vector3(side * Math.abs(best.tip.x), best.tip.y, best.tip.z),
+  }))
 }
 
 /** Posição estimada dos olhos, assentada sobre a superfície do crânio. */

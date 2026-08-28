@@ -155,6 +155,11 @@ export class CatScene {
     }
   }
 
+  /** Alcance de cada osso no skinning, para caçar deformação. */
+  boneInfluence() {
+    return this.glb?.boneInfluence()
+  }
+
   /** Quantas íris o gerador de piscada encontrou na textura. */
   get blinkRegions() {
     return this.glb?.blinkRegions ?? 0
@@ -358,6 +363,11 @@ export class CatScene {
       cat.pos[0] = 0
       cat.pos[1] = 0
       cat.target = null
+      this.goal = null
+      // Congelar sem zerar a locomoção deixava a velocidade travada no último
+      // valor, e a pose de marcha continuava mandando: o gato "dormia" de pé.
+      this.motion.speed = 0
+      this.motion.gait = 'still'
     }
 
     // --- Decisão: reavaliada 3 vezes por segundo, não a cada quadro. ---

@@ -178,23 +178,49 @@ export function computeSkinning(
   const si = new Uint16Array(n * 4)
   const sw = new Float32Array(n * 4)
 
-  // Segmento de influência de cada osso: do pai até ele.
+  // Segmento de influência de cada osso.
+  //
+  // O segmento vai do pai até o osso — exceto para quem começa um apêndice,
+  // como a base da orelha: ali o segmento pai→osso atravessaria o crânio
+  // inteiro e a orelha passaria a mandar em toda a cabeça. Foi exatamente o que
+  // aconteceu: cada orelha dominava mais de oito mil vértices e amassava a cara
+  // do gato ao girar.
   const segA: THREE.Vector3[] = []
   const segB: THREE.Vector3[] = []
+  const reach: number[] = []
+  const spine = rig.spine.idx
+  const bodyLength = rig.bindPos[spine[0]].distanceTo(rig.bindPos[spine[Math.min(9, spine.length - 1)]])
+
   for (let b = 0; b < B; b++) {
     const par = rig.parent[b]
+    const child = rig.primaryChild[b]
     segB.push(rig.bindPos[b])
     segA.push(par >= 0 ? rig.bindPos[par] : rig.bindPos[b])
+    // Alcance proporcional ao próprio osso, com um piso ligado ao tamanho do
+    // corpo: um osso curto não pode reivindicar carne do outro lado do bicho,
+    // mas também não pode ficar sem nada por ser curto.
+    const len = segA[b].distanceTo(segB[b])
+    // As pontas de cadeia — patas e ponta da cauda — precisam de folga extra:
+    // o osso ali é curto e a carne em volta é gorda, e sem isso os dedos ficam
+    // fora do alcance de qualquer osso e se soltam do corpo.
+    const terminal = child < 0
+    // Alcance generoso e sobreposto: o que separa um osso do outro é o peso,
+    // não a fronteira. Regiões de influência que não se sobrepõem produzem
+    // costuras visíveis na malha.
+    reach.push(Math.max(len * 2.6, bodyLength * (terminal ? 0.30 : 0.17)))
   }
 
   const v = new THREE.Vector3()
   const ab = new THREE.Vector3()
   const av = new THREE.Vector3()
   const best: Array<{ b: number; w: number }> = []
+  let fallbackBone = 0
+  let fallbackD = Infinity
 
   for (let i = 0; i < n; i++) {
     v.fromBufferAttribute(positions, i)
     best.length = 0
+    fallbackD = Infinity
     for (let b = 0; b < B; b++) {
       if (skip.has(b)) continue
       const a = segA[b]
@@ -213,20 +239,35 @@ export function computeSkinning(
           v.z - (a.z + ab.z * t),
         )
       }
-      const d2 = d * d
-      const w = 1 / (d2 * d2 * d2 + 1e-12)
-      best.push({ b, w })
+      if (d < fallbackD) {
+        fallbackD = d
+        fallbackBone = b
+      }
+      // Janela suave: o peso decresce até zero exatamente no alcance do osso.
+      //
+      // A versão anterior cortava a influência de repente — por alcance e por
+      // um limiar de 4% do maior peso. Dois vértices vizinhos acabavam com
+      // conjuntos de ossos diferentes e se separavam ao deformar: era isso que
+      // rachava o flanco e esticava a orelha, mesmo na pose de repouso.
+      const x = d / reach[b]
+      if (x >= 1) continue
+      const window = (1 - x) * (1 - x)
+      best.push({ b, w: (window * window) / (d * d * d + 1e-9) })
     }
+
+    if (best.length === 0) {
+      si[i * 4] = fallbackBone
+      sw[i * 4] = 1
+      for (let k = 1; k < 4; k++) {
+        si[i * 4 + k] = 0
+        sw[i * 4 + k] = 0
+      }
+      continue
+    }
+
     best.sort((p, q) => q.w - p.w)
-    // Descarta influências residuais: sem este corte o osso de uma perna ainda
-    // puxa a carne do lado oposto, e o tronco derrete ao andar.
-    const top = best[0]?.w ?? 0
     let sum = 0
-    for (let k = 0; k < 4; k++) {
-      const e = best[k]
-      if (e && e.w < top * 0.04) e.w = 0
-      sum += e?.w ?? 0
-    }
+    for (let k = 0; k < 4; k++) sum += best[k]?.w ?? 0
     for (let k = 0; k < 4; k++) {
       const e = best[k]
       si[i * 4 + k] = e ? e.b : 0

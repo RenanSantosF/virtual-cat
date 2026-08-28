@@ -291,10 +291,13 @@ export class GlbPoser {
       // A cabeça pode ter girado: a orelha acompanha.
       const headQ = this.headQuat
       const dir = bindDir.clone()
+        // Achatar a orelha é girar cerca de 45°, não 70: além disso a malha
+        // estica, porque a deformação linear não preserva volume em rotações
+        // grandes, e a orelha vira uma aba de couro.
         .applyEuler(new THREE.Euler(
-          earBack * 1.25,
-          side * (earBack * 0.55 - twitch * 0.05),
-          side * -earBack * 0.5,
+          earBack * 0.78,
+          side * (earBack * 0.34 - twitch * 0.04),
+          side * -earBack * 0.30,
           'YXZ',
         ))
         .applyQuaternion(headQ)
