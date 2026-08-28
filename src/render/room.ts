@@ -140,6 +140,18 @@ export function buildRoom(): RoomRefs {
     group.add(sk)
   }
 
+  // Teto. A câmera sobe o bastante para olhar por cima da parede, e ali havia
+  // um vazio preto — o buraco que denuncia na hora que o cômodo é um cenário
+  // de três paredes e não um lugar.
+  const ceiling = new THREE.Mesh(
+    new THREE.PlaneGeometry(W * 2, D * 2),
+    new THREE.MeshStandardMaterial({ color: 0xf2efe9, roughness: 1, side: THREE.DoubleSide }),
+  )
+  ceiling.rotation.x = Math.PI / 2
+  ceiling.position.y = WALL_H
+  ceiling.receiveShadow = true
+  group.add(ceiling)
+
   // --- Janela ---
   const frameMat = new THREE.MeshStandardMaterial({ color: 0xf7f4ee, roughness: 0.4 })
   const frameT = 0.05
@@ -270,25 +282,26 @@ export function buildRoom(): RoomRefs {
   }
   base.castShadow = true
   base.receiveShadow = true
-  sofa.position.set(-ROOM.halfW + 0.02, 0, 0.1)
+  sofa.position.set(-ROOM.halfW + 0.02, 0, -0.18)
   group.add(sofa)
-  contact(group, contactTex, sofa.position.x, sofa.position.z + 0.1, 1.1, 0.85)
+  contact(group, contactTex, sofa.position.x, sofa.position.z, 1.1, 0.85)
 
-  // Manta jogada sobre o braço do sofá — o detalhe que diz que alguém mora
-  // aqui. Cai dos dois lados do braço, senão vira uma barra flutuando.
-  const throwMat = new THREE.MeshStandardMaterial({ color: 0xb8705d, roughness: 0.99 })
-  const armZ = 0.1 + SL / 2 - 0.09
-  const throwTop = new THREE.Mesh(roundedBox(SD + 0.06, 0.035, 0.30, 0.015), throwMat)
-  throwTop.position.set(-ROOM.halfW + 0.02, 0.782, armZ)
-  throwTop.castShadow = true
-  group.add(throwTop)
-  for (const [dz, rot] of [[0.155, 0.22], [-0.155, -0.22]] as Array<[number, number]>) {
-    const fall = new THREE.Mesh(roundedBox(SD + 0.05, 0.26, 0.035, 0.015), throwMat)
-    fall.position.set(-ROOM.halfW + 0.02, 0.66, armZ + dz)
-    fall.rotation.x = rot
-    fall.castShadow = true
-    group.add(fall)
-  }
+  // Manta dobrada sobre o assento — o detalhe que diz que alguém mora aqui.
+  // Ela já esteve pendurada no braço do sofá; caindo dos dois lados, virava
+  // dois riscos vermelhos no ar, porque uma faixa rígida não sabe drapejar.
+  // Dobrada e apoiada, a geometria simples é exatamente o que a coisa é.
+  const throwMat = new THREE.MeshStandardMaterial({ color: 0xb06a56, roughness: 0.99 })
+  const folded = new THREE.Mesh(roundedBox(SD - 0.14, 0.055, 0.40, 0.025), throwMat)
+  folded.position.set(-ROOM.halfW + 0.02, 0.585, -0.18 + SL / 2 - 0.34)
+  folded.rotation.y = 0.06
+  folded.castShadow = true
+  folded.receiveShadow = true
+  group.add(folded)
+  const folded2 = new THREE.Mesh(roundedBox(SD - 0.20, 0.045, 0.34, 0.022), throwMat)
+  folded2.position.set(-ROOM.halfW + 0.05, 0.632, -0.18 + SL / 2 - 0.33)
+  folded2.rotation.y = -0.10
+  folded2.castShadow = true
+  group.add(folded2)
 
   // --- Potes ---
   const ceramic = new THREE.MeshPhysicalMaterial({
