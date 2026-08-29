@@ -44,7 +44,7 @@ export function Game({ cat }: { cat: CatState }) {
     sceneRef.current = scene
     setCoatLabel(scene.coatLabel)
     scene.start()
-    void scene.loadModel(new URL('models/cat.glb', document.baseURI).href)
+    void scene.loadModel(new URL('models/gato.glb', document.baseURI).href)
 
     const onResize = () => scene.resize()
     window.addEventListener('resize', onResize)

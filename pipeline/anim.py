@@ -11,22 +11,47 @@ isso que deixa o clipe repetir sem solavanco.
 import math
 import bpy
 
-TODOS = None  # preenchido por `preparar`
+TODOS = None       # nomes dos ossos, preenchido por `preparar`
+ALTURA = 1.0       # altura do quadril acima do chão, idem
 
 
 def preparar(arm):
-    global TODOS
+    """
+    Prepara o esqueleto e mede a altura do quadril.
+
+    Os deslocamentos de raiz nas poses são frações dessa altura, não unidades
+    do arquivo: o modelo já mudou de escala uma vez no meio do pipeline, e
+    poses escritas em unidades absolutas viram lixo silencioso quando isso
+    acontece — o gato afunda no chão ou flutua, e nada no código denuncia.
+    """
+    global TODOS, ALTURA
     for pb in arm.pose.bones:
         pb.rotation_mode = 'XYZ'
     TODOS = [pb.name for pb in arm.pose.bones]
+    ossos = arm.data.bones
+    ALTURA = float(ossos['coluna0'].head_local.z - ossos['raiz'].head_local.z)
     return arm
 
 
 def _aplicar(arm, pose):
+    """
+    Escreve uma pose nos ossos.
+
+    A chave `_raiz` é o deslocamento do corpo em espaço do mundo — descer para
+    sentar, subir para pular. Ela é convertida para o espaço do próprio osso
+    porque é assim que o Blender guarda translação de osso, e escrever direto
+    ali mandaria o gato para o lado errado.
+    """
+    import mathutils
     for nome in TODOS:
         pb = arm.pose.bones[nome]
         x, y, z = pose.get(nome, (0, 0, 0))
         pb.rotation_euler = (math.radians(x), math.radians(y), math.radians(z))
+        pb.location = (0, 0, 0)
+    raiz = arm.pose.bones.get('raiz')
+    if raiz is not None:
+        mundo = mathutils.Vector(pose.get('_raiz', (0, 0, 0))) * ALTURA
+        raiz.location = raiz.bone.matrix_local.to_3x3().inverted() @ mundo
 
 
 def _fcurves(act):
@@ -60,6 +85,8 @@ def clipe(arm, nome, quadros, interpolacao='BEZIER'):
         _aplicar(arm, pose)
         for pbname in TODOS:
             arm.pose.bones[pbname].keyframe_insert(data_path='rotation_euler', frame=q)
+        if 'raiz' in TODOS:
+            arm.pose.bones['raiz'].keyframe_insert(data_path='location', frame=q)
     for fc in _fcurves(act):
         for kp in fc.keyframe_points:
             kp.interpolation = interpolacao

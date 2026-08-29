@@ -47,12 +47,19 @@ def construir(obj):
             b.use_connect = conectar
         return b
 
-    # --- coluna: do quadril ao peito ---
+    # --- raiz ---
+    # Todo rig de jogo tem um osso na origem, no chão, do qual o resto pende.
+    # É ele que desce quando o gato senta e sobe quando ele pula: sem raiz, a
+    # única forma de baixar o corpo seria girar a coluna, e aí o gato deita
+    # dobrando a espinha em vez de se abaixar.
     col = L['coluna'][:5]
+    raiz = novo('raiz', [col[0][0], 0.0, L['chao']], [col[0][0] + L['comprimento'] * 0.08, 0.0, L['chao']])
+
+    # --- coluna: do quadril ao peito ---
     ossos_col = []
-    pai = None
+    pai = raiz
     for i in range(len(col) - 1):
-        b = novo(f'coluna{i}', col[i], col[i + 1], pai, conectar=pai is not None)
+        b = novo(f'coluna{i}', col[i], col[i + 1], pai, conectar=False)
         ossos_col.append(b)
         pai = b
     quadril, peito = ossos_col[0], ossos_col[-1]

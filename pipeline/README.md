@@ -38,3 +38,17 @@ indústria para calcular pesos de deformação, **recusa** malha não-manifold. 
       --texture-compress webp --texture-size 1024 --compress meshopt
 
 10,5 MB → 1,5 MB, sem perder animação.
+
+## Clipes gerados
+
+20 no total, em `clips.py`:
+
+**Laços** — parado, sentado, deitado, dormindo, andar, trotar, correr, lamber,
+beber, comer, na_caixa.
+
+**Uma vez** — espreguicar, pular.
+
+**Passagens** — sentar, levantar, deitar, erguer, adormecer, acordar, agachar.
+São elas que ligam uma postura à outra. O motor não interpola entre "em pé" e
+"deitado": ele toca o caminho, porque o meio do caminho entre duas poses não é
+uma pose que exista — o tronco atravessa o chão.

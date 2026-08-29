@@ -1,19 +1,15 @@
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { CatModel } from './cat'
-import { GlbCatModel } from './glbcat'
+import { Gato } from './gato'
 import { makeCoat, type Coat } from './coat'
 import { autoQuality, type Quality } from './fur'
 import { buildRoom, type RoomRefs } from './room'
 import { contactShadowTexture } from './textures'
 import { createPost, type PostFX } from './post'
-import { animate, locomotionPose, type AnimContext, type MotionContext } from './poses'
-import { blendPose, FaceSmoother, PoseSmoother } from './poseblend'
-import { applyIdleLife, newAttention, updateAttention, type Attention } from './idlelife'
-import { buildRig, defaultPose, TailSim, type PoseParams, type Rig } from './rig'
-import { bodyScale, neotenyFactor, ageMonths } from '../sim/growth'
+import { buildRig, defaultPose, type Rig } from './rig'
+import { bodyScale, neotenyFactor } from '../sim/growth'
 import { advance, litterFilth } from '../sim/engine'
-import { sickness } from '../sim/symptoms'
 import { chooseBehavior, flavor, isCreeping, type Runtime, urgencyOf } from '../ai/brain'
 import { coordination, newMotion, speedFactor, stepMotion, type Motion } from '../ai/motion'
 import { petTick } from '../sim/actions'
@@ -32,6 +28,20 @@ export interface SceneHooks {
   onTouch?: (region: string, hint: string | null) => void
 }
 
+/**
+ * De comportamento do cérebro para clipe de animação.
+ *
+ * Vários comportamentos compartilham a mesma postura de propósito: o que muda
+ * entre "entediado" e "descansando" é o que o jogo faz, não como o corpo está.
+ */
+const POSTURA: Record<string, string> = {
+  idle: 'parado', sit: 'sentado', watch: 'sentado', doze: 'deitado',
+  sleep: 'dormindo', rest: 'deitado', groom: 'lamber', eat: 'comer',
+  drink: 'beber', litter: 'na_caixa', stretch: 'espreguicar',
+  play: 'parado', stalk: 'parado', pounce: 'pular', scratch: 'parado',
+  greet: 'parado', knead: 'sentado', zoomies: 'correr',
+}
+
 export class CatScene {
   private renderer: THREE.WebGLRenderer
   private scene = new THREE.Scene()
@@ -40,10 +50,9 @@ export class CatScene {
   private post: PostFX | null = null
   private night = 0
   private model?: CatModel
-  private glb?: GlbCatModel
+  private gato?: Gato
   private coat!: Coat
   private rig: Rig
-  private tailSim = new TailSim()
   private hooks: SceneHooks
   private quality: Quality
 
@@ -51,20 +60,12 @@ export class CatScene {
   private last = performance.now()
   private clock = 0
   private motion: Motion = newMotion()
-  private poseSmoother = new PoseSmoother()
-  private faceSmoother = new FaceSmoother()
   /** Destino atual e intenção que o gerou. */
   private goal: [number, number] | null = null
   private goalUrgency = 0
   private goalCreep = false
-  private attention: Attention = newAttention()
 
   private brainTimer = 0
-  private blinkTimer = 3
-  private blinkProgress = 1
-  /** Rotação da cabeça em direção ao alvo do olhar, suavizada. */
-  private gaze = 0
-  private slowBlink = false
   private bodyCenter = new THREE.Vector3()
   private catShadow!: THREE.Mesh
   private firstFrame = true
@@ -85,9 +86,6 @@ export class CatScene {
   toyMode = false
   /** Trava comportamento e posição — usado apenas nos testes visuais. */
   private frozen: string | null = null
-  /** Última pose efetivamente aplicada, para inspeção durante o desenvolvimento. */
-  lastPose: PoseParams | null = null
-  lastTarget: PoseParams | null = null
   /** Hora forçada, só para inspecionar a iluminação nos testes. */
   private hourOverride: number | null = null
 
@@ -161,40 +159,29 @@ export class CatScene {
    */
   async loadModel(url: string) {
     try {
-      const glb = await GlbCatModel.load(url, (stage, pct) => this.hooks.onLoad?.(stage, pct))
+      const gato = await Gato.carregar(url, (stage, pct) => this.hooks.onLoad?.(stage, pct))
       if (this.model) {
         this.scene.remove(this.model.group)
         this.model.dispose()
         this.model = undefined
       }
-      this.glb = glb
-      this.scene.add(glb.group)
+      this.gato = gato
+      this.scene.add(gato.group)
       this.hooks.onLoad?.('pronto', 1)
     } catch (err) {
-      console.warn('Modelo esculpido indisponível; seguindo com o procedural.', err)
+      console.warn('Modelo animado indisponível; seguindo com o procedural.', err)
       this.hooks.onLoad?.('pronto', 1)
     }
   }
 
-  /** Alcance de cada osso no skinning, para caçar deformação. */
-  /** Onde as patas e o tronco realmente pararam, na pose atual. */
-  poseProbe() {
-    return this.glb && this.lastPose ? this.glb.probeFeet(this.lastPose) : null
+  /** Clipes disponíveis, para inspeção durante o desenvolvimento. */
+  get clipes(): string[] {
+    return this.gato?.animator.clipes ?? []
   }
 
-  boneInfluence() {
-    return this.glb?.boneInfluence()
-  }
-
-  /** Quantas íris o gerador de piscada encontrou na textura. */
-  get blinkRegions() {
-    return this.glb?.blinkRegions ?? 0
-  }
-
-  /** Trava a abertura das pálpebras, para conferir o piscar nos testes. */
-  private blinkOverride: number | null = null
-  setBlink(v: number | null) {
-    this.blinkOverride = v
+  /** Clipe tocando agora. */
+  get clipeAtual(): string {
+    return this.gato?.animator.atual ?? ''
   }
 
   /** Força a hora do dia, para conferir a luz sem esperar anoitecer. */
@@ -263,7 +250,7 @@ export class CatScene {
     this.stop()
     this.post?.dispose()
     this.model?.dispose()
-    this.glb?.dispose()
+    this.gato?.dispose()
     this.room.dispose()
     this.renderer.dispose()
   }
@@ -292,7 +279,7 @@ export class CatScene {
       }
       toNdc(e.clientX, e.clientY)
       this.raycaster.setFromCamera(this.ndc, this.camera)
-      const target = this.glb?.group ?? this.model?.group
+      const target = this.gato?.group ?? this.model?.group
       const hit = target ? this.raycaster.intersectObject(target, true) : []
       if (hit.length > 0) {
         this.dragging = 'pet'
@@ -341,8 +328,8 @@ export class CatScene {
   /** Um toque num ponto do corpo: descobre a região e deixa o gato reagir. */
   private touchAt(point: THREE.Vector3) {
     const cat = this.hooks.getCat()
-    if (!cat || !this.glb) return
-    const region = this.glb.regionAt(point)
+    if (!cat || !this.gato) return
+    const region = this.gato.regiaoEm(point)
     const rt = this.hooks.getRuntime()
     const now = Date.now()
     const res = touch(cat, rt, region, now)
@@ -439,120 +426,22 @@ export class CatScene {
     // --- Escala por idade ---
     const scale = bodyScale(cat.birth, now)
     const neoteny = neotenyFactor(cat.birth, now)
-    const months = ageMonths(cat.birth, now)
 
-    // --- Piscar ---
-    this.blinkTimer -= dt
-    if (this.blinkTimer <= 0) {
-      // Piscar lento é o "eu confio em você" dos gatos: só acontece relaxado.
-      this.slowBlink = rt.petting || (cat.stress < 25 && cat.bond > 50 && Math.random() < 0.35)
-      this.blinkTimer = this.slowBlink ? 5 + Math.random() * 6 : 3 + Math.random() * 9
-      this.blinkProgress = 0
-    }
-    const blinkSpeed = this.slowBlink ? 1.1 : 6.5
-    this.blinkProgress = Math.min(1, this.blinkProgress + dt * blinkSpeed)
-    const b = this.blinkProgress
-    const eyeOpen = this.blinkOverride ?? (b >= 1 ? 1 : 1 - Math.sin(b * Math.PI))
-
-    // --- Pose ---
-    const ctx: AnimContext = {
-      t: this.clock,
-      speed: this.motion.speed,
-      contentment: Math.max(0, Math.min(1, (cat.bond / 100) * 0.5 + (1 - cat.stress / 100) * 0.5)),
-      stress: cat.stress / 100,
-      energy: cat.needs.energy / 100,
-      stridePhase: this.motion.stridePhase,
-      blink: eyeOpen,
-      kitten: months < 6 ? 1 - months / 6 : 0,
-      sick: sickness(cat),
+    // --- Animação ---
+    // Aqui não se calcula pose nenhuma. Escolhe-se qual clipe toca, e a
+    // máquina cuida da passagem de um para o outro. Andar, trotar e correr
+    // saem da velocidade; o resto sai do comportamento.
+    const gato = this.gato
+    if (gato) {
+      const porVelocidade = gato.animator.locomocao(this.motion.speed)
+      const postura = porVelocidade ?? POSTURA[cat.behavior] ?? 'parado'
+      gato.animator.pedir(postura)
+      if (porVelocidade) gato.animator.ritmo(porVelocidade, this.motion.speed)
+      gato.crescer(scale, neoteny)
+      gato.update(dt)
     }
 
-    const mctx: MotionContext = {
-      gait: this.motion.gait,
-      speed: this.motion.speed,
-      stridePhase: this.motion.stridePhase,
-      wobble: this.motion.wobble,
-      stumble: this.motion.stumble,
-      coord,
-      turnRate: this.motion.turnRate,
-    }
-
-    // Enquanto se desloca, quem manda no corpo é a marcha; a atitude do
-    // comportamento entra por cima. Parado, é o contrário.
-    const behaviourAnim = animate(cat.behavior, ctx)
-    const moveAnim = locomotionPose(mctx, ctx)
-    const moveWeight = Math.min(1, this.motion.speed / 0.35)
-
-    const targetPose = moveWeight <= 0.001
-      ? behaviourAnim.pose
-      : blendPose(behaviourAnim.pose, moveAnim.pose, moveWeight)
-    const targetFace = moveWeight > 0.5 ? moveAnim.face : behaviourAnim.face
-    // A piscada não pode ABRIR um olho que o comportamento fechou: sobrescrever
-    // aqui deixava o gato de olhos arregalados enquanto dormia.
-    targetFace.eyeOpen = Math.min(targetFace.eyeOpen, eyeOpen)
-
-    this.lastTarget = targetPose
-    const pose = this.poseSmoother.update(targetPose, dt, moveWeight)
-    const face = this.faceSmoother.update(targetFace, dt)
-
-    // --- Para onde ele olha ---
-    // Andando, olha para onde vai. Parado, varre a sala e para em coisas
-    // específicas: a janela, o pote, você. É o que dá a impressão de que existe
-    // alguém decidindo lá dentro.
-    // Dormindo não se olha para nada: a cabeça já está posta contra o flanco
-    // pela própria pose, e somar o olhar por cima torcia o pescoço do gato
-    // adormecido.
-    const awake = cat.behavior === 'sleep' ? 0 : cat.behavior === 'doze' ? 0.3 : 1
-    updateAttention(this.attention, cat, now, rt.lure)
-    let lookAt: [number, number] | null = null
-    if (awake < 0.05) lookAt = null
-    else if (moveWeight > 0.3 && this.goal) lookAt = this.goal
-    else if (this.attention.atCamera) {
-      // A câmera está atrás e acima: projeta no chão para virar um alvo.
-      lookAt = [this.camera.position.x, this.camera.position.z]
-    } else lookAt = this.attention.target
-
-    if (lookAt) {
-      const dx = lookAt[0] - cat.pos[0]
-      const dz = lookAt[1] - cat.pos[1]
-      if (Math.hypot(dx, dz) > 0.15) {
-        let rel = Math.atan2(dx, dz) - cat.facing
-        while (rel > Math.PI) rel -= Math.PI * 2
-        while (rel < -Math.PI) rel += Math.PI * 2
-        // A cabeça vira só até certo ponto; além disso o gato giraria o corpo.
-        const want = Math.max(-1.0, Math.min(1.0, rel)) * 0.62
-        this.gaze += (want - this.gaze) * Math.min(1, dt * 3.4)
-      }
-    } else {
-      this.gaze += (0 - this.gaze) * Math.min(1, dt * 2)
-    }
-    pose.headYaw += this.gaze * awake
-
-    // --- Vida de fundo ---
-    // Depois da suavização, de propósito: estes movimentos têm amplitude
-    // pequena e frequência própria, e passar pelo suavizador os apagaria.
-    applyIdleLife(pose, face, {
-      t: this.clock,
-      moving: moveWeight,
-      asleep: cat.behavior === 'sleep' ? 1 : cat.behavior === 'doze' ? 0.6 : 0,
-      energy: cat.needs.energy / 100,
-      stress: cat.stress / 100,
-      sick: ctx.sick,
-      kitten: ctx.kitten,
-    })
-
-    this.lastPose = pose
-    const active = this.glb ?? this.model
-    if (this.glb) {
-      this.glb.update(pose, dt, scale, face)
-    } else if (this.model) {
-      this.rig = buildRig(pose, neoteny, this.rig)
-      const dir = new THREE.Vector3()
-      const root = this.model.tailRoot(this.rig, dir)
-      this.tailSim.step(root, dir, pose, dt)
-      this.model.setTailPoints(this.tailSim.points)
-      this.model.update(this.rig, face, scale)
-    }
+    const active = gato ?? this.model
     if (!active) return
     active.group.position.set(cat.pos[0], 0, cat.pos[1])
     active.group.rotation.y = cat.facing
@@ -567,16 +456,15 @@ export class CatScene {
     ;(this.catShadow.material as THREE.MeshBasicMaterial).opacity = 0.5 - lift
 
     // A câmera mira o centro real do corpo, não a posição dos pés.
-    if (this.glb) {
-      this.glb.bodyCenter(this.bodyCenter)
-    } else {
+    active.group.updateMatrixWorld(true)
+    if (gato) gato.centro(this.bodyCenter)
+    else {
       const N = this.rig.spine.length
       this.bodyCenter.set(0, 0, 0)
       for (let i = 0; i < N; i++) this.bodyCenter.add(this.rig.spine[i])
       this.bodyCenter.divideScalar(N)
+      active.group.localToWorld(this.bodyCenter)
     }
-    active.group.updateMatrixWorld(true)
-    active.group.localToWorld(this.bodyCenter)
 
     this.updateProps(cat, now)
     this.updateCamera(dt, scale)

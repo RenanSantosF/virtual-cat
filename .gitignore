@@ -3,3 +3,7 @@ dist/
 dev-dist/
 *.local
 .DS_Store
+
+# Blender
+pipeline/__pycache__/
+*.blend1

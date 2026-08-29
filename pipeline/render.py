@@ -5,6 +5,24 @@ import mathutils
 import numpy as np
 
 
+def piso(z, tam=6.0):
+    """
+    Chão de referência.
+
+    Sem ele não dá para julgar pose nenhuma: uma pata no ar e uma pata apoiada
+    desenham a mesma silhueta quando não há nada embaixo.
+    """
+    bpy.ops.mesh.primitive_plane_add(size=tam, location=(0, 0, z))
+    p = bpy.context.object
+    m = bpy.data.materials.new('piso')
+    m.use_nodes = True
+    b = m.node_tree.nodes['Principled BSDF']
+    b.inputs['Base Color'].default_value = (0.52, 0.50, 0.47, 1)
+    b.inputs['Roughness'].default_value = 0.9
+    p.data.materials.append(m)
+    return p
+
+
 def montar_estudio(amostras=48, larg=620, alt=540):
     for l in [o for o in bpy.data.objects if o.type in ('LIGHT', 'CAMERA')]:
         bpy.data.objects.remove(l, do_unlink=True)

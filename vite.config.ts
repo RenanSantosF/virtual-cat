@@ -31,8 +31,6 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2,glb}'],
         // As páginas de calibração não fazem parte do app.
-        globIgnores: ['**/glbview.html', '**/analyze.html', '**/poseview.html' ],
-        navigateFallbackDenylist: [/glbview|analyze|poseview/],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
       },
     }),
@@ -40,7 +38,7 @@ export default defineConfig({
   build: {
     target: 'es2020',
     rollupOptions: {
-      input: { main: 'index.html', glbview: 'glbview.html', analyze: 'analyze.html', poseview: 'poseview.html' },
+      input: { main: 'index.html' },
     },
   },
 })
