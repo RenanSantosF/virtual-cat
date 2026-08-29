@@ -1,7 +1,8 @@
 # Pipeline de arte
 
-Transforma `public/models/cat.glb` — uma escultura de impressão 3D gerada por
-IA, sem esqueleto e sem animação — num personagem de jogo rigado e animado.
+Transforma `pipeline/origem-cat.glb` — uma malha crua gerada por IA, sem
+esqueleto, sem animação, sem UV e sem cor nenhuma — num personagem de jogo
+rigado, pintado e animado.
 
 Roda inteiro por linha de comando, com o Blender como módulo Python. Não
 precisa de PC nem de interface gráfica.
@@ -11,20 +12,25 @@ precisa de PC nem de interface gráfica.
 
 ## Por que este pipeline existe
 
-O modelo de origem tem **156 peças soltas** e **25.142 arestas quebradas**. Não
-é um corpo: são pedaços encostados uns nos outros. Ao dobrar qualquer
-articulação eles se separam — foi o que produziu a cara amassada e o rasgo
-branco no flanco nas versões anteriores.
+Nenhum modelo gerado por IA chega pronto para animar. O primeiro que passou por
+aqui tinha **156 peças soltas** e **25.142 arestas quebradas** — não era um
+corpo, eram pedaços encostados uns nos outros, e ao dobrar qualquer articulação
+eles se separavam. Isso não é contornável em código de runtime: o `bone heat`,
+algoritmo padrão da indústria para pesos de deformação, **recusa** malha
+não-manifold. Por isso existe `retopo.py`.
 
-Isso não é contornável em código de runtime. O `bone heat`, algoritmo padrão da
-indústria para calcular pesos de deformação, **recusa** malha não-manifold. A
-única saída é reconstruir a superfície antes de rigar.
+O modelo atual chegou limpo — 1 peça, 0 arestas quebradas — e dispensa a
+retopologia. Mas chegou sem UV e sem cor, e por isso existem `preparar.py` e
+`pelagem.py`.
 
 ## Etapas
 
 | Módulo | O que faz |
 |---|---|
-| `retopo.py` | Remesh por voxel: 156 peças → 1, 25.142 arestas quebradas → 0, 171k → 31k faces. Depois rebaixa a pelagem do original para as coordenadas novas. |
+| `preparar.py` | Descobre a orientação por medida — eixo mais longo é o comprimento, cabeça é a ponta com massa no alto —, centra, normaliza a escala e cria as UVs. |
+| `pelagem.py` | Constrói a pelagem como shader procedural em coordenadas do objeto e assa numa imagem. Em coordenadas do objeto, e não da textura, é o que faz as listras darem a volta no corpo em vez de serem desenhadas num plano. |
+| `retopo.py` | Só para malha suja: remesh por voxel que funde peças soltas e fecha buracos. |
+| `ajustar.py` | Resolve poses por medição: mede a altura real das patas na malha deformada e empurra os parâmetros até ela zerar. |
 | `landmarks.py` | Lê os pontos anatômicos da própria malha — patas, coluna, cauda, cabeça, orelhas — por análise de fatias. Nenhuma coordenada escrita à mão. |
 | `build_rig.py` | Monta 29 ossos e chama o `bone heat`. |
 | `anim.py` | Autoria dos clipes. Uma pose é `{osso: (x, y, z)}` em graus; um clipe é uma lista de `(quadro, pose)`. |

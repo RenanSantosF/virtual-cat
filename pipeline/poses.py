@@ -1,14 +1,20 @@
 """
 Vocabulário de poses.
 
-Cada pose descreve só o que muda; o que não aparece volta ao repouso. Os sinais
-saem da calibração feita em render: no rig deste modelo, +X no pescoço levanta
-a cabeça, +X no cotovelo joga a perna à frente, +X na cauda a levanta, e
-`_raiz` desloca o corpo em espaço de mundo.
+Cada pose descreve só o que muda; o que não aparece volta ao repouso.
 
-`_raiz` é dado em frações da altura do quadril: −0.55 quer dizer "desce 55%
-do que separa o quadril do chão". Assim a pose vale para qualquer escala do
-arquivo, e o gato não afunda no chão se o pipeline for reprocessado.
+Os números não foram escolhidos a olho. As posturas em que alguma parte tem de
+encostar no chão — sentar, agachar, usar a caixa — saíram do resolvedor em
+`ajustar.py`, que mede a altura real das patas na malha deformada e empurra os
+parâmetros até ela zerar. Cada uma traz a medição junto, em comentário: é o que
+permite conferir depois se ainda vale, quando o modelo mudar.
+
+`_raiz` é dado em frações da altura do quadril, não em unidades do arquivo:
+assim a pose sobrevive a uma troca de escala.
+
+Sinais deste rig, medidos por calibração: +X no pescoço levanta a cabeça, +X no
+cotovelo joga a perna à frente, +X na cauda a levanta, e arquear a coluna com
+sinal positivo ergue a frente do corpo.
 """
 
 # ---------- estáticas ----------
@@ -16,82 +22,89 @@ arquivo, e o gato não afunda no chão se o pipeline for reprocessado.
 PARADO = {}
 
 SENTADO = {
-    # Resolvido por medição, não a olho: com estes valores a pata dianteira
-    # para a 0,002 do chão e a garupa a 0,002 — as duas apoiadas. O erro que
-    # custou mais tentativas foi girar a `coluna0`: ela carrega as traseiras
-    # junto, e o gato inteiro tombava para trás em vez de sentar. O arco tem de
-    # ficar nas vértebras acima do quadril.
-    '_raiz': (0, 0, -0.35),
-    'trasE_cotovelo': (95, 0, 0), 'trasD_cotovelo': (95, 0, 0),
-    'trasE_punho': (-109, 0, 0), 'trasD_punho': (-109, 0, 0),
-    'coluna1': (8.3, 0, 0), 'coluna2': (8.3, 0, 0), 'coluna3': (8.3, 0, 0),
-    # A dianteira estende para alcançar o chão a partir do peito já erguido.
-    'frenteE_cotovelo': (-50, 0, 0), 'frenteD_cotovelo': (-50, 0, 0),
-    'frenteE_punho': (50, 0, 0), 'frenteD_punho': (50, 0, 0),
-    'pescoco': (-11, 0, 0), 'cabeca': (4, 0, 0),
-    'cauda0': (-22, 0, 0), 'cauda1': (-10, 0, 0),
+    # Resolvido: pata dianteira a −0,002 do chão, bacia a −0,012.
+    # Dois erros custaram tentativas aqui. O primeiro foi girar a `coluna0`:
+    # ela carrega as traseiras junto, e o gato tombava para trás em vez de
+    # sentar — o arco tem de ficar nas vértebras acima do quadril. O segundo
+    # foi deixar o resolvedor mexer na dianteira: ele a jogava para trás para
+    # alcançar o chão, e a pose virava uma reverência. Sentado, a dianteira é
+    # quase vertical, e quem baixa a garupa é a traseira dobrada.
+    '_raiz': (0, 0, -0.40),
+    'trasE_cotovelo': (123, 0, 0), 'trasD_cotovelo': (123, 0, 0),
+    'trasE_punho': (-145, 0, 0), 'trasD_punho': (-145, 0, 0),
+    'coluna1': (6.2, 0, 0), 'coluna2': (6.2, 0, 0), 'coluna3': (6.2, 0, 0),
+    'frenteE_cotovelo': (-12, 0, 0), 'frenteD_cotovelo': (-12, 0, 0),
+    'frenteE_punho': (6, 0, 0), 'frenteD_punho': (6, 0, 0),
+    'pescoco': (-9, 0, 0), 'cabeca': (5, 0, 0),
+    'cauda0': (-20, 0, 0), 'cauda1': (-9, 0, 0),
 }
 
 DEITADO = {
-    '_raiz': (0, 0, -0.80),
-    'frenteE_cotovelo': (74, 0, 0), 'frenteD_cotovelo': (74, 0, 0),
-    'frenteE_punho': (-64, 0, 0), 'frenteD_punho': (-64, 0, 0),
-    'trasE_cotovelo': (78, 0, 0), 'trasD_cotovelo': (78, 0, 0),
-    'trasE_punho': (-88, 0, 0), 'trasD_punho': (-88, 0, 0),
-    'coluna0': (6, 0, 0),
-    'pescoco': (4, 0, 0),
-    'cauda0': (-40, 0, 12), 'cauda1': (-20, 0, 20), 'cauda2': (0, 0, 26),
+    # Esfinge: peito no chão, patas recolhidas sob o corpo, cabeça erguida.
+    '_raiz': (0, 0, -0.72),
+    'frenteE_cotovelo': (72, 0, 0), 'frenteD_cotovelo': (72, 0, 0),
+    'frenteE_punho': (-96, 0, 0), 'frenteD_punho': (-96, 0, 0),
+    'trasE_cotovelo': (118, 0, 0), 'trasD_cotovelo': (118, 0, 0),
+    'trasE_punho': (-138, 0, 0), 'trasD_punho': (-138, 0, 0),
+    'coluna1': (4, 0, 0), 'coluna2': (3, 0, 0),
+    'pescoco': (6, 0, 0),
+    'cauda0': (-34, 0, 10), 'cauda1': (-16, 0, 18), 'cauda2': (0, 0, 24),
 }
 
 DORMINDO = {
+    # "Pão de forma": o mesmo corpo do deitado, com a cabeça recolhida contra o
+    # peito e a cauda trazida para o lado. Enrolar de verdade — focinho junto à
+    # barriga — pede a coluna torcida além do que a deformação linear aguenta.
     **DEITADO,
-    'pescoco': (-16, 0, 14), 'cabeca': (-24, 0, 18),
-    'orelhaE': (-14, 0, 0), 'orelhaD': (-14, 0, 0),
-    'cauda1': (-20, 0, 34), 'cauda2': (0, 0, 40), 'cauda3': (0, 0, 34),
+    'pescoco': (-20, 0, 12), 'cabeca': (-26, 0, 14),
+    'orelhaE': (-12, 0, 0), 'orelhaD': (-12, 0, 0),
+    'cauda1': (-18, 0, 32), 'cauda2': (0, 0, 38), 'cauda3': (0, 0, 30),
 }
 
 ESPREGUICANDO = {
-    '_raiz': (0, 0, -0.30),
-    # Peito no chão, garupa no alto: o alongamento que todo gato faz ao acordar.
-    'coluna0': (-26, 0, 0), 'coluna1': (-14, 0, 0), 'coluna2': (-8, 0, 0),
-    'frenteE_cotovelo': (52, 0, 0), 'frenteD_cotovelo': (52, 0, 0),
-    'frenteE_punho': (-30, 0, 0), 'frenteD_punho': (-30, 0, 0),
-    'trasE_cotovelo': (-18, 0, 0), 'trasD_cotovelo': (-18, 0, 0),
-    'pescoco': (22, 0, 0),
-    'cauda0': (34, 0, 0), 'cauda1': (22, 0, 0),
+    # Peito e antebraços no chão, garupa no alto. A medição aqui é do
+    # antebraço, não da pata: é ele que apoia nesta postura.
+    '_raiz': (0, 0, 0.01),
+    'coluna1': (-21, 0, 0), 'coluna2': (-13, 0, 0),
+    'frenteE_cotovelo': (81, 0, 0), 'frenteD_cotovelo': (81, 0, 0),
+    'frenteE_punho': (-122, 0, 0), 'frenteD_punho': (-122, 0, 0),
+    'trasE_cotovelo': (-17, 0, 0), 'trasD_cotovelo': (-17, 0, 0),
+    'trasE_punho': (14, 0, 0), 'trasD_punho': (14, 0, 0),
+    'pescoco': (11, 0, 0),
+    'cauda0': (38, 0, 0), 'cauda1': (24, 0, 0),
 }
 
 BEBENDO = {
-    '_raiz': (0, 0, -0.16),
-    'frenteE_cotovelo': (14, 0, 0), 'frenteD_cotovelo': (14, 0, 0),
-    'coluna0': (-6, 0, 0), 'coluna3': (-16, 0, 0),
-    'pescoco': (-52, 0, 0), 'cabeca': (-26, 0, 0),
-    'cauda0': (-12, 0, 0),
+    'frenteE_cotovelo': (10, 0, 0), 'frenteD_cotovelo': (10, 0, 0),
+    'frenteE_punho': (-14, 0, 0), 'frenteD_punho': (-14, 0, 0),
+    'coluna3': (-14, 0, 0),
+    'pescoco': (-56, 0, 0), 'cabeca': (-22, 0, 0),
+    'cauda0': (-10, 0, 0),
 }
 
 NA_CAIXA = {
-    # Derivada do agachado, que é a postura que funcionou: corpo baixo sobre as
-    # traseiras dobradas. Por cima vêm o dorso arqueado e a cauda erguida — os
-    # dois sinais que fazem o jogador entender o que está acontecendo sem uma
-    # linha de texto.
-    '_raiz': (0, 0, -0.50),
-    'trasE_cotovelo': (78, 0, 0), 'trasD_cotovelo': (78, 0, 0),
-    'trasE_punho': (-92, 0, 0), 'trasD_punho': (-92, 0, 0),
-    'frenteE_cotovelo': (-18, 0, 0), 'frenteD_cotovelo': (-18, 0, 0),
-    'frenteE_punho': (18, 0, 0), 'frenteD_punho': (18, 0, 0),
-    'coluna1': (-12, 0, 0), 'coluna2': (-16, 0, 0), 'coluna3': (-10, 0, 0),
-    'pescoco': (14, 0, 0), 'cabeca': (-6, 0, 0),
-    'cauda0': (58, 0, 0), 'cauda1': (34, 0, 0), 'cauda2': (16, 0, 0),
+    # Resolvido: patas a +0,003 e −0,003 do chão.
+    # Agachado sobre as traseiras dobradas, dorso arqueado e cauda erguida —
+    # os dois sinais que fazem o jogador entender o que está acontecendo sem
+    # uma linha de texto.
+    '_raiz': (0, 0, -0.40),
+    'trasE_cotovelo': (132, 0, 0), 'trasD_cotovelo': (132, 0, 0),
+    'trasE_punho': (-158, 0, 0), 'trasD_punho': (-158, 0, 0),
+    'frenteE_cotovelo': (59, 0, 0), 'frenteD_cotovelo': (59, 0, 0),
+    'frenteE_punho': (-83, 0, 0), 'frenteD_punho': (-83, 0, 0),
+    'coluna1': (4, 0, 0), 'coluna2': (5, 0, 0), 'coluna3': (2, 0, 0),
+    'pescoco': (-5, 0, 0),
+    'cauda0': (55, 0, 0), 'cauda1': (30, 0, 0), 'cauda2': (14, 0, 0),
 }
 
 AGACHADO = {
     # Meio caminho para o salto: peso atrás, corpo baixo, cauda esticada.
-    '_raiz': (0, 0, -0.58),
-    'trasE_cotovelo': (48, 0, 0), 'trasD_cotovelo': (48, 0, 0),
-    'trasE_punho': (-62, 0, 0), 'trasD_punho': (-62, 0, 0),
-    'frenteE_cotovelo': (22, 0, 0), 'frenteD_cotovelo': (22, 0, 0),
-    'frenteE_punho': (-18, 0, 0), 'frenteD_punho': (-18, 0, 0),
-    'coluna0': (8, 0, 0),
-    'pescoco': (10, 0, 0),
-    'cauda0': (-10, 0, 0),
+    '_raiz': (0, 0, -0.34),
+    'trasE_cotovelo': (112, 0, 0), 'trasD_cotovelo': (112, 0, 0),
+    'trasE_punho': (-134, 0, 0), 'trasD_punho': (-134, 0, 0),
+    'frenteE_cotovelo': (50, 0, 0), 'frenteD_cotovelo': (50, 0, 0),
+    'frenteE_punho': (-70, 0, 0), 'frenteD_punho': (-70, 0, 0),
+    'coluna1': (3, 0, 0), 'coluna2': (2, 0, 0),
+    'pescoco': (8, 0, 0),
+    'cauda0': (-8, 0, 0),
 }

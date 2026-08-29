@@ -14,9 +14,12 @@ import mathutils
 sys.path.insert(0, '/home/user/virtual-cat/pipeline')
 from landmarks import extrair, cadeia_perna
 
-# Altura em que cada perna encontra o corpo. As dianteiras nascem mais abaixo:
-# a escápula do gato desliza sobre o tórax, não há clavícula presa.
-TOPO_PERNA = {'frenteE': -0.14, 'frenteD': -0.14, 'trasE': -0.02, 'trasD': -0.02}
+# Altura em que cada perna encontra o corpo, como fração da altura do quadril.
+# As dianteiras nascem mais abaixo: a escápula do gato desliza sobre o tórax,
+# não há clavícula presa. Fração, e não medida absoluta, porque cada modelo
+# chega numa escala diferente — em unidades fixas o encaixe da perna ia parar
+# no meio da barriga de um e no chão do outro.
+TOPO_PERNA = {'frenteE': 0.62, 'frenteD': 0.62, 'trasE': 0.86, 'trasD': 0.86}
 OSSOS_PERNA = ['ombro', 'cotovelo', 'punho', 'pata']
 
 
@@ -52,7 +55,7 @@ def construir(obj):
     # É ele que desce quando o gato senta e sobe quando ele pula: sem raiz, a
     # única forma de baixar o corpo seria girar a coluna, e aí o gato deita
     # dobrando a espinha em vez de se abaixar.
-    col = L['coluna'][:5]
+    col = L['coluna'][:6]
     raiz = novo('raiz', [col[0][0], 0.0, L['chao']], [col[0][0] + L['comprimento'] * 0.08, 0.0, L['chao']])
 
     # --- coluna: do quadril ao peito ---
@@ -76,14 +79,16 @@ def construir(obj):
         pai = novo(f'cauda{i}', L['cauda'][i], L['cauda'][i + 1], pai, conectar=i > 0)
 
     # --- pernas ---
+    quadril_z = float(col[0][2])
     for k, pata in L['patas'].items():
-        cadeia = cadeia_perna(co, pata, L['chao'], TOPO_PERNA[k])
+        topo = L['chao'] + (quadril_z - L['chao']) * TOPO_PERNA[k]
+        cadeia = cadeia_perna(co, pata, L['chao'], topo, escala=L['comprimento'])
         pai = peito if k.startswith('frente') else quadril
         for i in range(len(cadeia) - 1):
             pai = novo(f'{k}_{OSSOS_PERNA[i]}', cadeia[i], cadeia[i + 1], pai, conectar=i > 0)
         # a pata precisa de um osso próprio, senão o pé não gira
         novo(f'{k}_{OSSOS_PERNA[-1]}', cadeia[-1],
-             cadeia[-1] + np.array([0.06 if k.startswith('frente') else 0.06, 0, 0.0]), pai, conectar=True)
+             cadeia[-1] + np.array([L['comprimento'] * 0.06, 0, 0.0]), pai, conectar=True)
 
     bpy.ops.object.mode_set(mode='OBJECT')
 

@@ -22,7 +22,9 @@ def extrair(co: np.ndarray) -> dict:
         return s.mean(0)
 
     # --- patas: vértices junto ao chão, agrupados por frente/trás e lado ---
-    pes = co[co[:, 2] < chao + 0.09]
+    # Limiar proporcional ao bicho, não em unidades do arquivo: o mesmo
+    # número absoluto pega a pata inteira num modelo e meia perna noutro.
+    pes = co[co[:, 2] < chao + comprimento * 0.09]
     patas = {}
     for nome, fx in (('frente', lambda p: p[:, 0] > 0), ('tras', lambda p: p[:, 0] <= 0)):
         meio = pes[fx(pes)]
@@ -31,15 +33,31 @@ def extrair(co: np.ndarray) -> dict:
             if len(g):
                 patas[f'{nome}{lado}'] = g.mean(0)
 
-    # --- coluna: centro da metade superior de cada fatia, do quadril ao pescoço ---
-    x0, x1 = mn[0] + comprimento * 0.20, mn[0] + comprimento * 0.81
-    coluna = []
-    for i in range(7):
-        a = x0 + (x1 - x0) * i / 6
-        b = a + (x1 - x0) / 6
-        p = centro_de((co[:, 0] >= a) & (co[:, 0] < b), alto=55)
-        if p is not None:
-            coluna.append(np.array([(a + b) / 2, 0.0, p[2]]))
+    # --- coluna: do quadril à cernelha ---
+    #
+    # Lida em fatias finas e depois suavizada. Fatia grossa pega ombro, quadril
+    # e orelha na mesma média, e a linha da coluna sai serrilhada — o dorso do
+    # gato passa a subir e descer a cada vértebra. A faixa para antes da cabeça
+    # de propósito: dali para a frente quem manda é o pescoço.
+    x0, x1 = mn[0] + comprimento * 0.22, mn[0] + comprimento * 0.80
+    bruto = []
+    N = 16
+    for i in range(N):
+        a = x0 + (x1 - x0) * i / N
+        b = a + (x1 - x0) / N
+        p = centro_de((co[:, 0] >= a) & (co[:, 0] < b), alto=62)
+        bruto.append(((a + b) / 2, p[2] if p is not None else None))
+    zs = [z for _, z in bruto if z is not None]
+    media = float(np.mean(zs)) if zs else 0.0
+    alturas = np.array([z if z is not None else media for _, z in bruto])
+    suave = np.convolve(alturas, np.ones(5) / 5, mode='same')
+    suave[:2] = alturas[:2].mean()
+    suave[-2:] = alturas[-2:].mean()
+    # Sete pontos espalhados por toda a faixa. Pegar de dois em dois deixava a
+    # coluna parando no meio das costas, e o pescoço saía com um terço do
+    # comprimento do gato para cobrir o resto.
+    idx = np.linspace(0, N - 1, 7).round().astype(int)
+    coluna = [np.array([bruto[i][0], 0.0, float(suave[i])]) for i in idx]
 
     # --- cauda: fatias atrás do quadril ---
     cauda = []
@@ -74,7 +92,8 @@ def extrair(co: np.ndarray) -> dict:
     }
 
 
-def cadeia_perna(co: np.ndarray, pata: np.ndarray, chao: float, topo: float, n: int = 4):
+def cadeia_perna(co: np.ndarray, pata: np.ndarray, chao: float, topo: float,
+                 n: int = 4, escala: float = 1.0):
     """
     Articulações de uma perna, de cima para baixo.
 
@@ -87,11 +106,12 @@ def cadeia_perna(co: np.ndarray, pata: np.ndarray, chao: float, topo: float, n: 
         t = 1 - i / (n - 1)                    # 1 no topo, 0 no chão
         z = chao + (topo - chao) * t
         h = (topo - chao) / (n - 1) * 0.75
-        janela = 0.15 + t * 0.12
-        m = ((np.abs(co[:, 1] - pata[1]) < 0.14)
+        janela = escala * (0.15 + t * 0.12)
+        largura = janela * 0.9
+        m = ((np.abs(co[:, 1] - pata[1]) < largura)
              & (np.abs(co[:, 0] - pata[0]) < janela)
              & (co[:, 2] >= z - h) & (co[:, 2] <= z + h))
         s = co[m]
         pts.append(s.mean(0) if len(s) >= 8 else np.array([pata[0], pata[1], z]))
-    pts[-1] = np.array([pata[0], pata[1], chao + 0.02])   # a ponta é a pata medida
+    pts[-1] = np.array([pata[0], pata[1], chao + escala * 0.02])   # a ponta é a pata medida
     return pts
