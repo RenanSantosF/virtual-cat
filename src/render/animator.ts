@@ -54,6 +54,7 @@ const ATIVIDADES: Record<string, Atividade> = {
 
 /** Velocidade de referência de cada marcha, em m/s. */
 const VELOCIDADE: Record<string, number> = { andar: 0.55, trotar: 1.35, correr: 3.2 }
+const MARCHAS = new Set(['andar', 'trotar', 'correr'])
 
 /** Busca em largura: o caminho mais curto de uma postura até outra. */
 function caminho(de: Postura, para: Postura): string[] {
@@ -146,9 +147,19 @@ export class Animator {
     a.setEffectiveWeight(1)
     a.setEffectiveTimeScale(1)
     a.enabled = true
-    a.play()
     const velha = this.acoes.get(this.tocando)
-    if (velha && velha !== a) a.crossFadeFrom(velha, MISTURA, false)
+    // Preserva a fase de apoio ao mudar de marcha: a pata que estava plantada
+    // continua plantada, em vez de teleportar para outra parte do ciclo.
+    if (velha && MARCHAS.has(nome) && MARCHAS.has(this.tocando)) {
+      const oldDuration = Math.max(0.001, velha.getClip().duration)
+      const phase = (velha.time % oldDuration) / oldDuration
+      a.time = phase * a.getClip().duration
+    }
+    a.play()
+    if (velha && velha !== a) {
+      const blend = MARCHAS.has(nome) && MARCHAS.has(this.tocando) ? 0.16 : MISTURA
+      a.crossFadeFrom(velha, blend, true)
+    }
     this.tocando = nome
     if (emLaco) {
       this.esperando = false

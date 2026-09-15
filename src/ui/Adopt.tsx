@@ -12,8 +12,8 @@ export function Adopt() {
     <div className="adopt">
       <h1>Um gato de verdade</h1>
       <p>
-        Ele chega com oito semanas, do tamanho de duas mãos, e cresce no ritmo de um
-        gato real — meses, não minutos.
+        Ele chega com duas semanas, cabe nas suas mãos e depende de fórmula, sono e
+        calor. Cresce no ritmo de um gato real — meses, não minutos.
       </p>
       <p>
         Tem fome, sede, sono e limites. Ele não obedece: decide. Se você cuidar bem,
@@ -31,8 +31,9 @@ export function Adopt() {
         Trazer para casa
       </button>
       <p className="fine">
-        O tempo corre mesmo com o app fechado. Deixe ração e água antes de sair.
-        Ele esconde quando adoece — reparar é com você.
+        Esta é uma alma digital única, gerada só nesta adoção: nenhum outro gato
+        no mundo terá a mesma identidade. O tempo corre mesmo com o app fechado;
+        se ele se for, esta vida não poderá ser restaurada nem clonada.
       </p>
       <PastCats list={past} />
     </div>

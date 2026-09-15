@@ -5,8 +5,8 @@ export const MS_WEEK = 7 * MS_DAY
 export const MS_MONTH = 30.4375 * MS_DAY
 export const MS_YEAR = 365.25 * MS_DAY
 
-/** Idade com que o gato chega até você — a mesma em que um filhote real é desmamado. */
-export const ADOPTION_AGE = 8 * MS_WEEK
+/** A simulação começa na fase neonatal; cuidados e locomoção refletem essa fragilidade. */
+export const ADOPTION_AGE = 2 * MS_WEEK
 
 /**
  * Curva de peso de um gato doméstico de porte médio, em kg por mês de vida.
@@ -57,18 +57,45 @@ export function ageMonths(birth: number, now: number): number {
 }
 
 /** Peso corporal em kg, derivado da idade real em tempo de calendário. */
-export function weightKg(birth: number, now: number): number {
-  return interp(WEIGHT_CURVE, ageMonths(birth, now))
+export function weightKg(birth: number, now: number, nutrition = 1): number {
+  // Cuidados ruins retardam, mas nunca revertem, a maturação estrutural.
+  const careFactor = 0.82 + clamp01(nutrition) * 0.18
+  return interp(WEIGHT_CURVE, ageMonths(birth, now)) * careFactor
 }
+
+function clamp01(value: number) { return Math.max(0, Math.min(1, value)) }
 
 /**
  * Escala visual do modelo, relativa ao gato adulto (1.0).
  * Massa cresce com o cubo do comprimento, então a escala linear é a raiz cúbica
  * da razão de peso — é assim que um filhote parece proporcionalmente correto.
  */
-export function bodyScale(birth: number, now: number): number {
+export function bodyScale(birth: number, now: number, nutrition = 1): number {
   const adult = 4.5
-  return Math.cbrt(weightKg(birth, now) / adult)
+  return Math.cbrt(weightKg(birth, now, nutrition) / adult)
+}
+
+export interface MotorCapabilities {
+  coordination: number
+  maxSpeed: number
+  maxJumpM: number
+  canRun: boolean
+  canClimbFurniture: boolean
+  canPounce: boolean
+}
+
+/** Capacidades desbloqueadas por maturação contínua, não por níveis artificiais. */
+export function motorCapabilities(birth: number, now: number): MotorCapabilities {
+  const m = ageMonths(birth, now)
+  const coordination = clamp01((m - 0.4) / 7)
+  return {
+    coordination,
+    maxSpeed: 0.25 + coordination * 3.15,
+    maxJumpM: Math.max(0, (m - 2) / 8) * 1.25,
+    canRun: m >= 2.5,
+    canClimbFurniture: m >= 4,
+    canPounce: m >= 3,
+  }
 }
 
 /**

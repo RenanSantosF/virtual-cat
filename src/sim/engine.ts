@@ -1,10 +1,11 @@
 import { metabolism, ADOPTION_AGE, MS_DAY, ageMonths } from './growth'
+import { comfortRange, seasonalClimate, thermalStep } from './climate'
 import { makePersonality } from './personality'
 import { clamp } from './random'
 import { dist, SPOTS } from './world'
 import type { CatState, Illness, IllnessKind, NeedKey } from './types'
 
-export const STATE_VERSION = 1
+export const STATE_VERSION = 2
 
 /** Passo fixo da simulação, em segundos reais. */
 const STEP = 60
@@ -45,7 +46,7 @@ export function newCat(name: string, now: number, seed = Math.floor(Math.random(
     version: STATE_VERSION,
     name,
     seed,
-    // Chega com 8 semanas, como um filhote real recém-desmamado.
+    // Chega ainda neonatal: pequeno, descoordenado e dependente de fórmula/calor.
     birth: now - ADOPTION_AGE,
     lastTick: now,
     personality: makePersonality(seed),
@@ -69,9 +70,12 @@ export function newCat(name: string, now: number, seed = Math.floor(Math.random(
     observed: [],
     bowl: { food: 0, foodKind: 'kibble', servedAt: now, water: 0, waterFilledAt: now },
     litter: { uses: 0, lastCleaned: now },
+    environment: seasonalClimate(now),
+    care: { nutrition: 0.75, safety: 0.75, social: 0.5, samples: 1 },
+    accidents: [],
     inventory: {
       coins: 120,
-      items: { kibble: 6, wet: 2, litter: 3, wand: 1 },
+      items: { kittenFormula: 8, kibble: 4, wet: 2, litter: 3, wand: 1 },
     },
     behavior: 'hide',
     behaviorSince: now,
@@ -159,6 +163,13 @@ function stepOnce(cat: CatState, now: number, hours: number, catchup: boolean) {
   const meta = metabolism(cat.birth, now)
   const months = ageMonths(cat.birth, now)
   const asleep = cat.behavior === 'sleep' || cat.behavior === 'doze'
+  if (cat.environment.source === 'seasonal') {
+    const fallback = seasonalClimate(now)
+    cat.environment.outdoorC = fallback.outdoorC
+    cat.environment.humidity = fallback.humidity
+    cat.environment.measuredAt = now
+  }
+  thermalStep(cat.environment, hours)
 
   // --- Decaimento das necessidades ---
   n.hunger = clamp(n.hunger - DECAY_PER_HOUR.hunger * meta * hours)
@@ -184,6 +195,18 @@ function stepOnce(cat: CatState, now: number, hours: number, catchup: boolean) {
   sleepCycle(cat, now)
   autonomy(cat, now, hours, catchup)
   healthStep(cat, now, hours)
+  learnFromCare(cat, hours)
+}
+
+function learnFromCare(cat: CatState, hours: number) {
+  const alpha = Math.min(0.02, hours / (24 * 14))
+  const nutrition = Math.min(cat.needs.hunger, cat.needs.thirst) / 100
+  const safety = (cat.health / 100) * (1 - cat.stress / 100)
+  const social = cat.needs.affection / 100
+  cat.care.nutrition += (nutrition - cat.care.nutrition) * alpha
+  cat.care.safety += (safety - cat.care.safety) * alpha
+  cat.care.social += (social - cat.care.social) * alpha
+  cat.care.samples += hours
 }
 
 /**
@@ -277,6 +300,10 @@ function autonomy(cat: CatState, now: number, hours: number, catchup: boolean) {
       n.bladder = 100
       n.hygiene = clamp(n.hygiene - 18)
       cat.stress = clamp(cat.stress + 12)
+      const spots = ['rug', 'underTable', 'corner'] as const
+      const pick = Math.abs((cat.seed + cat.litter.uses) % spots.length)
+      cat.accidents.push({ at: now, spot: spots[pick], cleaned: false })
+      if (cat.accidents.length > 20) cat.accidents.shift()
       if (Math.random() < 0.05) addIllness(cat, 'uti', now, 0.3)
     }
   }
@@ -296,6 +323,10 @@ function isBusy(cat: CatState) {
 function healthStep(cat: CatState, now: number, hours: number) {
   const n = cat.needs
   let damage = 0
+  const months = ageMonths(cat.birth, now)
+  const [comfortMin, comfortMax] = comfortRange(months)
+  const cold = Math.max(0, comfortMin - cat.environment.roomC)
+  const heat = Math.max(0, cat.environment.roomC - comfortMax)
 
   // Calibrado para que a negligência total leve cerca de cinco a seis dias até
   // a perda — que é o tempo que um gato realmente resiste sem água, e a janela
@@ -306,6 +337,7 @@ function healthStep(cat: CatState, now: number, hours: number) {
   if (n.hygiene < 20) damage += 0.06
   if (litterFilth(cat, now) > 0.9) damage += 0.08
   if (cat.stress > 80) damage += (cat.stress - 80) * 0.012
+  damage += cold * (months < 3 ? 0.08 : 0.025) + heat * 0.035
 
   // Doenças não tratadas pioram sozinhas.
   for (const ill of cat.illnesses) {
@@ -318,6 +350,7 @@ function healthStep(cat: CatState, now: number, hours: number) {
   if (now - cat.lastVetVisit > 180 * MS_DAY && Math.random() < 0.004 * hours * 60) {
     addIllness(cat, 'worms', now, 0.2)
   }
+  if (cold > 4 && Math.random() < 0.006 * cold * hours) addIllness(cat, 'cold', now, 0.2)
 
   if (damage > 0) {
     cat.health = clamp(cat.health - damage * hours)
@@ -332,6 +365,7 @@ function healthStep(cat: CatState, now: number, hours: number) {
   if (litterFilth(cat, now) > 0.7) stressPush += 1.8
   if (cat.illnesses.length > 0) stressPush += 2.0
   if (cat.health < 50) stressPush += 1.5
+  if (cold > 1) stressPush += cold * 0.3
   cat.stress = clamp(cat.stress + stressPush * hours)
 
   // --- Vínculo ---

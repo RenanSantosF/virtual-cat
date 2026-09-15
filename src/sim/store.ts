@@ -4,6 +4,7 @@ import { advance, newCat } from './engine'
 import { saveMemorial } from './memorial'
 import { load, save, wipe } from './persistence'
 import type { CatState } from './types'
+import { syncLocalWeather } from './weather'
 
 interface Game {
   cat: CatState | null
@@ -63,4 +64,6 @@ export function installPersistence() {
     if (document.visibilityState === 'hidden') flush()
   })
   window.addEventListener('pagehide', flush)
+  const cat = useGame.getState().cat
+  if (cat) void syncLocalWeather(cat).then((updated) => { if (updated) flush() })
 }

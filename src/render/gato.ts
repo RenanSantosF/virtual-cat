@@ -2,6 +2,8 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { Animator } from './animator'
+import { makeModelFur, type ModelFur, type Quality } from './fur'
+import type { Coat } from './coat'
 import type { TouchRegion } from '../sim/touch'
 
 /**
@@ -41,8 +43,17 @@ export class Gato {
   private ossos = new Map<string, THREE.Object3D>()
   private escalaBase = 1
   private caixa = new THREE.Box3()
+  private fur!: ModelFur
+  private shells: THREE.SkinnedMesh[] = []
+  private clock = 0
 
-  static async carregar(url: string, onProgress?: (m: string, f: number) => void): Promise<Gato> {
+  static async carregar(
+    url: string,
+    coat: Coat,
+    seed: number,
+    quality: Quality,
+    onProgress?: (m: string, f: number) => void,
+  ): Promise<Gato> {
     const g = new Gato()
     onProgress?.('Carregando o gato', 0.1)
     const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder)
@@ -76,7 +87,7 @@ export class Gato {
     orienta.position.y = -caixa.min.y * g.escalaBase
     g.group.add(orienta)
 
-    g.aprimorarMaterial()
+    g.aprimorarMaterial(coat, seed, quality)
     g.animator = new Animator(raiz, gltf.animations)
     onProgress?.('Pronto', 1)
     return g
@@ -87,19 +98,27 @@ export class Gato {
    * fio — a luz que corre na ponta do pelo e não na pele — e disso quem cuida
    * é o `sheen`, não o brilho especular comum.
    */
-  private aprimorarMaterial() {
+  private aprimorarMaterial(coat: Coat, seed: number, quality: Quality) {
     const antigo = this.malha.material as THREE.MeshStandardMaterial
-    const novo = new THREE.MeshPhysicalMaterial({
-      map: antigo.map,
-      color: 0xffffff,
-      roughness: 0.86,
-      metalness: 0,
-      sheen: 1,
-      sheenRoughness: 0.35,
-      sheenColor: new THREE.Color(0xfff2e0),
-      envMapIntensity: 0.75,
-    })
-    this.malha.material = novo
+    this.fur = makeModelFur(antigo.map, seed, quality)
+    // Uma tintura sutil mantém olhos/nariz do atlas e faz a identidade genética
+    // aparecer sem destruir detalhes pintados na textura original.
+    this.fur.surface.color.copy(new THREE.Color(coat.base)).lerp(new THREE.Color(0xffffff), 0.72)
+    this.malha.material = this.fur.surface
+    for (const material of this.fur.shells) {
+      material.color.copy(this.fur.surface.color)
+      const shell = new THREE.SkinnedMesh(this.malha.geometry, material)
+      shell.bind(this.malha.skeleton, this.malha.bindMatrix)
+      shell.bindMode = this.malha.bindMode
+      shell.position.copy(this.malha.position)
+      shell.quaternion.copy(this.malha.quaternion)
+      shell.scale.copy(this.malha.scale)
+      shell.frustumCulled = false
+      shell.castShadow = false
+      shell.renderOrder = 1
+      this.malha.parent?.add(shell)
+      this.shells.push(shell)
+    }
     antigo.dispose()
   }
 
@@ -149,18 +168,51 @@ export class Gato {
     if (cabeca) {
       // Filhote tem cabeça grande em relação ao corpo — é o que faz o olho ler
       // "filhote" e não "gato pequeno".
-      const s = 1 + neotenia * 0.22
+      // `neotenia` já vale 1 no adulto. Usá-lo diretamente acrescentava 22%
+      // até ao crânio adulto e fazia o corpo parecer um boneco cabeçudo.
+      const s = 1 + (neotenia - 1) * 0.72
       cabeca.scale.setScalar(s)
     }
   }
 
-  update(dt: number) {
+  update(dt: number, speed = 0, turnRate = 0, stress = 0) {
+    this.clock += dt
     this.animator.update(dt)
+    this.secondaryMotion(speed, turnRate, stress)
+  }
+
+  /** Movimento aditivo de baixa amplitude: quebra a rigidez dos clipes sem competir com eles. */
+  private secondaryMotion(speed: number, turnRate: number, stress: number) {
+    const moving = Math.min(1, speed / 1.4)
+    const breath = Math.sin(this.clock * (moving > 0.1 ? 4.2 : 1.7)) * (0.006 + stress * 0.000025)
+    const spine = this.ossos.get('coluna2')
+    if (spine) {
+      spine.rotation.z += Math.sin(this.clock * 5.1) * moving * 0.012
+      spine.rotation.y += THREE.MathUtils.clamp(-turnRate * 0.018, -0.055, 0.055)
+      spine.rotation.x += breath
+    }
+    const head = this.ossos.get('cabeca')
+    if (head) {
+      // Cabeça compensa o balanço do tronco; é a estabilidade visual felina.
+      head.rotation.z -= Math.sin(this.clock * 5.1) * moving * 0.018
+      head.rotation.y += THREE.MathUtils.clamp(turnRate * 0.035, -0.09, 0.09)
+    }
+    const alert = 0.018 + stress * 0.00022
+    for (const [index, name] of ['orelhaE', 'orelhaD'].entries()) {
+      const ear = this.ossos.get(name)
+      if (ear) ear.rotation.y += Math.sin(this.clock * 2.3 + index * 2.1) * alert
+    }
+    // A cauda fica atrasada nas curvas e nunca acompanha o corpo como uma haste.
+    for (let i = 0; i < 5; i++) {
+      const tail = this.ossos.get(`cauda${i}`)
+      if (tail) tail.rotation.z += -turnRate * 0.025 * ((i + 1) / 5) + Math.sin(this.clock * 1.4 - i * 0.45) * 0.006
+    }
   }
 
   dispose() {
     this.malha.geometry.dispose()
-    ;(this.malha.material as THREE.Material).dispose()
+    this.shells.forEach((shell) => shell.removeFromParent())
+    this.fur.dispose()
   }
 }
 
