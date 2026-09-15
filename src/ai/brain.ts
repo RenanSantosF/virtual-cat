@@ -1,6 +1,7 @@
 import { crepuscularDrive, foodSpoilage, litterFilth } from '../sim/engine'
 import { activeSymptomBehavior, sickness } from '../sim/symptoms'
-import { ageMonths } from '../sim/growth'
+import { ageMonths, motorCapabilities } from '../sim/growth'
+import { comfortRange } from '../sim/climate'
 import { clampToRoom, dist, ROOM, SPOTS } from '../sim/world'
 import type { BehaviorId, CatState } from '../sim/types'
 
@@ -113,9 +114,17 @@ export function chooseBehavior(cat: CatState, rt: Runtime, now: number): Candida
   const drive = crepuscularDrive(now)
   const months = ageMonths(cat.birth, now)
   const kitten = months < 6
+  const motor = motorCapabilities(cat.birth, now)
   const c: Candidate[] = []
 
   const need = (v: number) => Math.max(0, 100 - v)
+
+  // Termorregulação precede lazer: o gato escolhe uma fonte de calor e se encolhe.
+  const [comfortMin] = comfortRange(months)
+  const cold = Math.max(0, comfortMin - cat.environment.roomC)
+  if (cold > 0.8) {
+    c.push({ id: 'doze', score: 55 + cold * (kitten ? 32 : 18), target: SPOTS.warmElectronics })
+  }
 
   // Medo domina tudo o mais.
   if (now < rt.spookUntil) {
@@ -164,7 +173,7 @@ export function chooseBehavior(cat: CatState, rt: Runtime, now: number): Candida
   c.push({ id: 'play', score: playDrive * 1.25, target: randomSpot(cat, now) })
   // Zoomies: surto súbito, típico do fim da tarde.
   if (n.energy > 72 && n.stimulation < 45 && drive > 0.55) {
-    c.push({ id: 'run', score: 120 * p.energy * drive })
+    if (motor.canRun) c.push({ id: 'run', score: 120 * p.energy * drive })
   }
 
   // Higiene: sempre se lambe depois de comer.
@@ -172,7 +181,9 @@ export function chooseBehavior(cat: CatState, rt: Runtime, now: number): Candida
   c.push({ id: 'groom', score: need(n.hygiene) * 1.15 + (justAte ? 150 : 0) })
 
   // Social. Depende de vínculo e sociabilidade — um gato arisco simplesmente não vem.
-  const social = need(n.affection) * (0.15 + p.sociability) * (cat.bond / 100) * 1.6
+  // A genética não é sobrescrita: a história de cuidado atua como um fenótipo aprendido.
+  const learnedSocial = (cat.care.social - 0.5) * 0.3
+  const social = need(n.affection) * (0.15 + p.sociability + learnedSocial) * (cat.bond / 100) * 1.6
   c.push({ id: 'rub', score: social })
   if (cat.bond > 55 && cat.stress < 35) {
     c.push({ id: 'knead', score: 45 * (cat.bond / 100) * (1 - p.independence * 0.6), target: SPOTS.bed })
@@ -218,7 +229,7 @@ export function chooseBehavior(cat: CatState, rt: Runtime, now: number): Candida
   }
 
   c.sort((a, b) => b.score - a.score)
-  return c[0]
+  return c.find((candidate) => candidate.id !== 'pounce' || motor.canPounce) ?? c[0]
 }
 
 function randomSpot(cat: CatState, now: number): [number, number] {
@@ -233,24 +244,27 @@ function randomSpot(cat: CatState, now: number): [number, number] {
 
 /** Velocidade de deslocamento, em m/s, para o comportamento atual. */
 export function moveSpeed(cat: CatState): number {
+  const max = motorCapabilities(cat.birth, Date.now()).maxSpeed
+  let desired: number
   switch (cat.behavior) {
     case 'run':
-      return 3.4
+      desired = 3.4; break
     case 'stalk':
-      return 0.42
+      desired = 0.42; break
     case 'pounce':
-      return 4.2
+      desired = 4.2; break
     case 'play':
-      return 1.5
+      desired = 1.5; break
     case 'walk':
-      return 0.62
+      desired = 0.62; break
     case 'hide':
-      return 1.8
+      desired = 1.8; break
     case 'limp':
-      return 0.28
+      desired = 0.28; break
     default:
-      return 0.55
+      desired = 0.55
   }
+  return Math.min(desired, max)
 }
 
 /** Move o gato em direção ao alvo. Chamado a cada frame com dt em segundos. */

@@ -8,6 +8,7 @@ export const SPOTS = {
   bed: [-1.0, 1.05] as [number, number],
   window: [0.0, -1.72] as [number, number],
   scratcher: [1.85, 0.9] as [number, number],
+  warmElectronics: [-1.75, -1.25] as [number, number],
 }
 
 export function clampToRoom(p: [number, number]): [number, number] {

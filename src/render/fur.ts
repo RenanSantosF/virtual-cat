@@ -39,6 +39,69 @@ export type Quality = 'low' | 'medium' | 'high'
 
 const SHELL_COUNT: Record<Quality, number> = { low: 0, medium: 6, high: 12 }
 
+export interface ModelFur {
+  surface: THREE.MeshPhysicalMaterial
+  shells: THREE.MeshPhysicalMaterial[]
+  dispose(): void
+}
+
+/**
+ * Pelagem para uma malha rigada importada. Preserva o atlas anatômico assado
+ * no GLB e acrescenta micro-normal e volume apenas na silhueta.
+ */
+export function makeModelFur(
+  map: THREE.Texture | null,
+  seed: number,
+  quality: Quality,
+  furLength = 0.0045,
+): ModelFur {
+  const normalMap = furNormalTexture(seed)
+  const alphaNoise = furAlphaTexture(seed)
+  const surface = new THREE.MeshPhysicalMaterial({
+    map,
+    roughness: 0.94,
+    metalness: 0,
+    normalMap,
+    normalScale: new THREE.Vector2(0.28, 0.4),
+    sheen: 1,
+    sheenRoughness: 0.48,
+    sheenColor: new THREE.Color(0xffead5),
+    envMapIntensity: 0.55,
+  })
+  const shells: THREE.MeshPhysicalMaterial[] = []
+  const count = SHELL_COUNT[quality]
+  for (let i = 1; i <= count; i++) {
+    const layer = i / count
+    const material = surface.clone()
+    material.transparent = true
+    material.depthWrite = false
+    material.alphaTest = 0.16
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms.uLayer = { value: layer }
+      shader.uniforms.uLength = { value: furLength }
+      shader.uniforms.uStrands = { value: alphaNoise }
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform float uLayer; uniform float uLength; varying float vFurLayer;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFurLayer = uLayer; transformed += objectNormal * uLength * uLayer; transformed.y -= uLength * uLayer * uLayer * .24;')
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform sampler2D uStrands; varying float vFurLayer;')
+        .replace('#include <alphatest_fragment>', '#include <alphatest_fragment>\nfloat strand = texture2D(uStrands, vMapUv * 42.0).r; if (strand < vFurLayer * .94) discard; diffuseColor.a *= (1.0 - vFurLayer) * .72;')
+    }
+    material.customProgramCacheKey = () => `cat-fur-${layer.toFixed(3)}`
+    shells.push(material)
+  }
+  return {
+    surface,
+    shells,
+    dispose() {
+      normalMap.dispose()
+      alphaNoise.dispose()
+      surface.dispose()
+      shells.forEach((material) => material.dispose())
+    },
+  }
+}
+
 /**
  * Pelagem em duas partes: um material físico com brilho de veludo (sheen), que
  * já sozinho evita o aspecto de plástico, e um conjunto de cascas deslocadas ao

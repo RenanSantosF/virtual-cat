@@ -77,6 +77,30 @@ export interface LitterBox {
   lastCleaned: number
 }
 
+export interface EnvironmentState {
+  /** Temperatura externa mais recente; pode vir de clima real ou do fallback sazonal. */
+  outdoorC: number
+  /** Temperatura percebida na sala, com inércia térmica. */
+  roomC: number
+  humidity: number
+  source: 'weather' | 'seasonal'
+  measuredAt: number
+}
+
+export interface CareHistory {
+  /** Média móvel 0..1 usada para modular crescimento e temperamento aprendido. */
+  nutrition: number
+  safety: number
+  social: number
+  samples: number
+}
+
+export interface Accident {
+  at: number
+  spot: 'rug' | 'underTable' | 'corner'
+  cleaned: boolean
+}
+
 export type ItemId =
   | 'kibble'
   | 'wet'
@@ -152,6 +176,9 @@ export interface CatState {
 
   bowl: Bowl
   litter: LitterBox
+  environment: EnvironmentState
+  care: CareHistory
+  accidents: Accident[]
   inventory: Inventory
 
   /** Comportamento atual e quando começou. */

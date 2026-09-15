@@ -159,7 +159,10 @@ export class CatScene {
    */
   async loadModel(url: string) {
     try {
-      const gato = await Gato.carregar(url, (stage, pct) => this.hooks.onLoad?.(stage, pct))
+      const gato = await Gato.carregar(
+        url, this.coat, this.hooks.getCat()?.seed ?? 0, this.quality,
+        (stage, pct) => this.hooks.onLoad?.(stage, pct),
+      )
       if (this.model) {
         this.scene.remove(this.model.group)
         this.model.dispose()
@@ -424,7 +427,7 @@ export class CatScene {
     rt.arrived = arrived
 
     // --- Escala por idade ---
-    const scale = bodyScale(cat.birth, now)
+    const scale = bodyScale(cat.birth, now, cat.care.nutrition)
     const neoteny = neotenyFactor(cat.birth, now)
 
     // --- Animação ---
@@ -438,7 +441,7 @@ export class CatScene {
       gato.animator.pedir(postura)
       if (porVelocidade) gato.animator.ritmo(porVelocidade, this.motion.speed)
       gato.crescer(scale, neoteny)
-      gato.update(dt)
+      gato.update(dt, this.motion.speed, this.motion.turnRate, cat.stress)
     }
 
     const active = gato ?? this.model
