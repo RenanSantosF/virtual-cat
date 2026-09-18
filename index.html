@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no,maximum-scale=1">
+<meta name="theme-color" content="#141018">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Misha — gato de verdade</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="app">
+  <canvas id="scene"></canvas>
+
+  <!-- leitura do gato: o que ele está dizendo com o corpo -->
+  <div id="read" class="read">
+    <div class="read-mood" id="readMood">—</div>
+    <div class="read-body" id="readBody"></div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- barra de estado -->
+  <button id="statsBtn" class="stats-btn" aria-label="Estado do gato">
+    <span class="dot" id="alertDot"></span>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 21s-7.5-4.7-9.3-9.2C1.3 8.1 3.4 5 6.6 5c2 0 3.4 1.1 4.2 2.3l1.2 1.8 1.2-1.8C14 6.1 15.4 5 17.4 5c3.2 0 5.3 3.1 3.9 6.8C19.5 16.3 12 21 12 21z" fill="currentColor"/></svg>
+  </button>
+
+  <button id="clockBtn" class="clock-btn" aria-label="Hora"><span id="clockTxt">--:--</span></button>
+
+  <!-- ações -->
+  <nav id="actions" class="actions">
+    <button class="act" data-act="food"  aria-label="Comida"><span class="ico">🍽️</span><span class="lbl">Comida</span></button>
+    <button class="act" data-act="water" aria-label="Água"><span class="ico">💧</span><span class="lbl">Água</span></button>
+    <button class="act" data-act="play"  aria-label="Brincar"><span class="ico">🪶</span><span class="lbl">Brincar</span></button>
+    <button class="act" data-act="brush" aria-label="Escovar"><span class="ico">🪮</span><span class="lbl">Escovar</span></button>
+    <button class="act" data-act="litter" aria-label="Limpar caixa"><span class="ico">🧹</span><span class="lbl">Caixa</span></button>
+    <button class="act" data-act="call"  aria-label="Chamar"><span class="ico">🗣️</span><span class="lbl">Chamar</span></button>
+    <button class="act" data-act="blink" aria-label="Piscar devagar"><span class="ico">😌</span><span class="lbl">Piscar</span></button>
+  </nav>
+
+  <!-- modo brincadeira -->
+  <div id="playHud" class="play-hud hidden">
+    <div class="play-tip" id="playTip">Arraste a varinha. Movimento errático caça melhor — e deixe ele pegar às vezes.</div>
+    <button id="playStop" class="ghost-btn">Guardar varinha</button>
+  </div>
+
+  <!-- painel de comida -->
+  <div id="foodSheet" class="sheet hidden">
+    <div class="sheet-inner">
+      <h2>Alimentar</h2>
+      <p class="sheet-sub" id="bowlInfo"></p>
+      <div class="opts">
+        <button class="opt" data-food="dry">
+          <span class="opt-ico">🥣</span>
+          <span class="opt-txt"><b>Ração seca</b><small>Dura o dia. Ele come, mas sem festa.</small></span>
+        </button>
+        <button class="opt" data-food="wet">
+          <span class="opt-ico">🐟</span>
+          <span class="opt-txt"><b>Sachê / patê</b><small>Adora. Estraga em ~2h e aí ele recusa.</small></span>
+        </button>
+        <button class="opt" data-food="treat">
+          <span class="opt-ico">🍤</span>
+          <span class="opt-txt"><b>Petisco</b><small>Constrói confiança. Em excesso, perde valor.</small></span>
+        </button>
+      </div>
+      <button class="ghost-btn" data-close>Fechar</button>
+    </div>
+  </div>
+
+  <!-- painel de estado -->
+  <div id="statsSheet" class="sheet hidden">
+    <div class="sheet-inner">
+      <h2 id="catName">Misha</h2>
+      <p class="sheet-sub" id="catAge"></p>
+      <div id="bars" class="bars"></div>
+      <div class="bond-note" id="bondNote"></div>
+      <button class="ghost-btn" data-close>Fechar</button>
+    </div>
+  </div>
+
+  <!-- primeira vez -->
+  <div id="intro" class="sheet hidden">
+    <div class="sheet-inner">
+      <h2>Um gato, não um bichinho de botão</h2>
+      <p class="intro-p">Ele vive no relógio real: dorme ~16h por dia, acorda no amanhecer e no fim da tarde, come pouco e várias vezes, e <b>não vem quando você chama</b> só porque você chamou.</p>
+      <p class="intro-p">Carinho é por conta dele. Leia o rabo e as orelhas antes de encostar — rabo batendo e orelha pra trás é aviso. Ignorar o aviso custa confiança.</p>
+      <p class="intro-p">Se você sumir por dias, ele passa fome e se fecha. Confiança leva semanas pra subir e um susto pra cair.</p>
+      <label class="name-field">Nome dele
+        <input id="nameInput" type="text" maxlength="14" value="Misha" autocomplete="off">
+      </label>
+      <button class="primary-btn" id="introGo">Abrir a porta</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
